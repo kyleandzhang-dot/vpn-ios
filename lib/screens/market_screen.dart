@@ -8,7 +8,7 @@ class MarketScreen extends StatelessWidget {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: const Text('海外应用推荐', style: TextStyle(color: AppConfig.colorPrimary, fontWeight: FontWeight.bold)),[cite: 1]
+        title: const Text('海外应用推荐', style: TextStyle(color: AppConfig.colorPrimary, fontWeight: FontWeight.bold)),
         backgroundColor: AppConfig.colorBg,
         elevation: 0,
         iconTheme: const IconThemeData(color: AppConfig.colorPrimary),

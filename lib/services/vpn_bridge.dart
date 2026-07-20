@@ -28,7 +28,7 @@ class VpnBridge {
 
   static Future<void> connect(String nodeJson) async {
     try {
-      await _channel.invokeMethod('connect', {'node_json': nodeJson});[cite: 2]
+      await _channel.invokeMethod('connect', {'node_json': nodeJson});
     } catch (e) {
       rethrow;
     }
@@ -36,7 +36,7 @@ class VpnBridge {
 
   static Future<void> disconnect() async {
     try {
-      await _channel.invokeMethod('disconnect');[cite: 2]
+      await _channel.invokeMethod('disconnect');
     } catch (e) {
       rethrow;
     }

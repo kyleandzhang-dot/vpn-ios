@@ -9,7 +9,7 @@ class AgentTier {
     required this.wholesale,
   });
 
-  int get commission => price - wholesale; // 自动计算利润[cite: 1]
+  int get commission => price - wholesale; // 自动计算利润
 }
 
 const List<AgentTier> kAgentTiers = [

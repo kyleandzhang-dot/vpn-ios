@@ -16,13 +16,13 @@ class ApiService {
     final deviceInfo = DeviceInfoPlugin();
     if (Platform.isAndroid) {
       final androidInfo = await deviceInfo.androidInfo;
-      deviceId = androidInfo.id.replaceAll('-', '').toUpperCase();[cite: 1]
+      deviceId = androidInfo.id.replaceAll('-', '').toUpperCase();
     } else if (Platform.isIOS) {
       final iosInfo = await deviceInfo.iosInfo;
       deviceId = iosInfo.identifierForVendor?.replaceAll('-', '').toUpperCase() ?? '';
     }
 
-    if (deviceId == null || deviceId.isEmpty || deviceId == "0000000000000000") {[cite: 1]
+    if (deviceId == null || deviceId.isEmpty || deviceId == "0000000000000000") {
       deviceId = DateTime.now().millisecondsSinceEpoch.toString();
     }
 
@@ -32,7 +32,7 @@ class ApiService {
 
   static Future<Map<String, dynamic>> fetchConfig() async {
     try {
-      final response = await http.get(Uri.parse('${AppConfig.apiBaseUrl}/api/v1/config')).timeout(const Duration(seconds: 5));[cite: 1]
+      final response = await http.get(Uri.parse('${AppConfig.apiBaseUrl}/api/v1/config')).timeout(const Duration(seconds: 5));
       if (response.statusCode == 200) {
         return json.decode(response.body);
       }
@@ -42,7 +42,7 @@ class ApiService {
 
   static Future<Map<String, dynamic>> fetchVersion() async {
     try {
-      final response = await http.get(Uri.parse('${AppConfig.apiBaseUrl}/api/v1/app_version')).timeout(const Duration(seconds: 5));[cite: 1]
+      final response = await http.get(Uri.parse('${AppConfig.apiBaseUrl}/api/v1/app_version')).timeout(const Duration(seconds: 5));
       if (response.statusCode == 200) {
         return json.decode(response.body);
       }
@@ -52,16 +52,16 @@ class ApiService {
 
   static Future<Map<String, dynamic>> fetchInviteInfo() async {
     final deviceId = await getDeviceId();
-    final response = await http.get(Uri.parse('${AppConfig.apiBaseUrl}/api/v1/invite_info?device_id=$deviceId')).timeout(const Duration(seconds: 5));[cite: 1]
+    final response = await http.get(Uri.parse('${AppConfig.apiBaseUrl}/api/v1/invite_info?device_id=$deviceId')).timeout(const Duration(seconds: 5));
     return json.decode(response.body);
   }
 
   static Future<Map<String, dynamic>> bindInviteCode(String code) async {
     final deviceId = await getDeviceId();
     final response = await http.post(
-      Uri.parse('${AppConfig.apiBaseUrl}/api/v1/bind_invite'),[cite: 1]
+      Uri.parse('${AppConfig.apiBaseUrl}/api/v1/bind_invite'),
       headers: {'Content-Type': 'application/json'},
-      body: json.encode({'device_id': deviceId, 'invite_code': code}),[cite: 1]
+      body: json.encode({'device_id': deviceId, 'invite_code': code}),
     ).timeout(const Duration(seconds: 5));
     return json.decode(response.body);
   }
@@ -69,9 +69,9 @@ class ApiService {
   static Future<Map<String, dynamic>> recharge(String code) async {
     final deviceId = await getDeviceId();
     final response = await http.post(
-      Uri.parse('${AppConfig.apiBaseUrl}/api/v1/recharge'),[cite: 1]
+      Uri.parse('${AppConfig.apiBaseUrl}/api/v1/recharge'),
       headers: {'Content-Type': 'application/json'},
-      body: json.encode({'device_id': deviceId, 'code': code}),[cite: 1]
+      body: json.encode({'device_id': deviceId, 'code': code}),
     ).timeout(const Duration(seconds: 5));
     return json.decode(response.body);
   }
@@ -79,9 +79,9 @@ class ApiService {
   static Future<http.Response> getNode() async {
     final deviceId = await getDeviceId();
     return await http.post(
-      Uri.parse('${AppConfig.apiBaseUrl}/api/v1/get_node'),[cite: 1]
+      Uri.parse('${AppConfig.apiBaseUrl}/api/v1/get_node'),
       headers: {'Content-Type': 'application/json'},
-      body: json.encode({'device_id': deviceId}),[cite: 1]
+      body: json.encode({'device_id': deviceId}),
     ).timeout(const Duration(seconds: 5));
   }
 }

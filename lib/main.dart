@@ -13,15 +13,15 @@ class MyApp extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
-      title: AppConfig.appName,[cite: 1]
+      title: AppConfig.appName,
       debugShowCheckedModeBanner: false,
       theme: ThemeData(
-        scaffoldBackgroundColor: AppConfig.colorBg,[cite: 1]
-        primaryColor: AppConfig.colorPrimary,[cite: 1]
+        scaffoldBackgroundColor: AppConfig.colorBg,
+        primaryColor: AppConfig.colorPrimary,
         colorScheme: ColorScheme.fromSeed(
-          seedColor: AppConfig.colorPrimary,[cite: 1]
-          primary: AppConfig.colorPrimary,[cite: 1]
-          surface: AppConfig.colorBg,[cite: 1]
+          seedColor: AppConfig.colorPrimary,
+          primary: AppConfig.colorPrimary,
+          surface: AppConfig.colorBg,
         ),
         fontFamily: 'Roboto',
       ),

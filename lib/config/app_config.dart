@@ -2,9 +2,9 @@ import 'package:flutter/material.dart';
 
 class AppConfig {
   static const String appName = "喵脸";
-  static const String apiBaseUrl = "https://your-api-domain.com"; // 替换为实际后端地址[cite: 1]
+  static const String apiBaseUrl = "https://your-api-domain.com"; // 替换为实际后端地址
   
-  // 极简冷淡配色方案[cite: 1]
+  // 极简冷淡配色方案
   static const Color colorBg = Color(0xFFFFFFFF);
   static const Color colorPrimary = Color(0xFF000000);
   static const Color colorTextMain = Color(0xFF000000);
