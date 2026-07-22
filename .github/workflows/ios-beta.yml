@@ -16,10 +16,19 @@ jobs:
   # 只有 SING_BOX_VERSION 变化时才会重新编译（靠 cache key 命中判断）
   # ------------------------------------------------------------------
   build-libbox:
-    runs-on: macos-latest
+    # 锁定 macos-14，避开 macos-latest 已指向 macOS Tahoe (15/26) 后
+    # 对 Mach-O 可执行文件强制要求 LC_UUID load command 的问题
+    # （Go 内部链接器编译出的临时二进制不带 LC_UUID，会被 dyld 直接拒绝启动）
+    runs-on: macos-14
     timeout-minutes: 30
     outputs:
       cache-hit: ${{ steps.cache-libbox.outputs.cache-hit }}
+    env:
+      # 双保险：即便以后 macos-14 也被下线/升级，全局强制走系统外部链接器
+      # （会生成带 LC_UUID 的二进制），覆盖 sing-box Makefile 内部自己跑的
+      # `go run`，而不只是我们手动 go install 的 gomobile/gobind
+      CGO_ENABLED: 1
+      GOFLAGS: -ldflags=-linkmode=external
     steps:
       - name: Cache libbox xcframework
         id: cache-libbox
