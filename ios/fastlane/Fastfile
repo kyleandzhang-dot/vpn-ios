@@ -13,7 +13,9 @@ platform :ios do
     match(
       type: "appstore",
       readonly: false,
-      api_key: api_key
+      api_key: api_key,
+      keychain_name: "fastlane_match_keychain",
+      keychain_password: ENV["MATCH_PASSWORD"]
     )
 
     update_code_signing_settings(

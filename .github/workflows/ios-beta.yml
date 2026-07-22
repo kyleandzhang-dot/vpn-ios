@@ -1,14 +1,15 @@
 name: iOS Beta Build
 
 on:
-  workflow_dispatch:   # 手动触发,先测试用
+  workflow_dispatch:
   push:
     branches:
-      - main            # 如果你的默认分支不叫 main，改成对应名字
+      - main
 
 jobs:
   build:
     runs-on: macos-latest
+    timeout-minutes: 30
 
     steps:
       - name: Checkout code
@@ -19,8 +20,27 @@ jobs:
         with:
           channel: 'stable'
 
+      - name: Cache Flutter pub dependencies
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.pub-cache
+          key: ${{ runner.os }}-pub-${{ hashFiles('**/pubspec.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-pub-
+
       - name: Install Flutter dependencies
         run: flutter pub get
+
+      - name: Cache CocoaPods
+        uses: actions/cache@v4
+        with:
+          path: |
+            ios/Pods
+            ~/Library/Caches/CocoaPods
+          key: ${{ runner.os }}-pods-${{ hashFiles('ios/Podfile.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-pods-
 
       - name: Build Flutter iOS (no codesign)
         run: flutter build ios --release --no-codesign
