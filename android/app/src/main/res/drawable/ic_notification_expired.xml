@@ -1,0 +1,43 @@
+<!--
+    到期提醒通知栏图标
+    规范：安卓通知小图标只读取 alpha 通道，颜色会被系统统一替换（一般是白色/主题色），
+    所以这里只能用白色 + 透明，不能靠颜色叠加做遮罩，镂空必须用单个 path 内的
+    evenOdd 规则自身实现（同一个 <path> 里嵌套一个小圆，交叉两次的区域会自动变透明）。
+
+    造型：空心圆环 + 感叹号，比系统自带的实心感叹号更精致、更符合"提醒/告警"的语义。
+-->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="24dp"
+    android:height="24dp"
+    android:viewportWidth="24"
+    android:viewportHeight="24">
+
+    <!-- 外圈：圆环（大圆减去小圆，evenOdd 自动镂空出圆环效果） -->
+    <path
+        android:fillColor="#FFFFFF"
+        android:fillType="evenOdd"
+        android:pathData="
+            M12,3
+            A9,9 0 1,0 12,21
+            A9,9 0 1,0 12,3
+            Z
+            M12,4.6
+            A7.4,7.4 0 1,1 12,19.4
+            A7.4,7.4 0 1,1 12,4.6
+            Z" />
+
+    <!-- 感叹号竖条 -->
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M11,7.2 L13,7.2 L12.6,14.4 L11.4,14.4 Z" />
+
+    <!-- 感叹号圆点 -->
+    <path
+        android:fillColor="#FFFFFF"
+        android:fillType="evenOdd"
+        android:pathData="
+            M12,15.7
+            A1.4,1.4 0 1,0 12,18.5
+            A1.4,1.4 0 1,0 12,15.7
+            Z" />
+</vector>

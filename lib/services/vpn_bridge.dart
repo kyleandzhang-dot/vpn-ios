@@ -4,8 +4,8 @@ import 'package:flutter/services.dart';
 enum VpnState { disconnected, connecting, connected, expired }
 
 class VpnBridge {
-  static const MethodChannel _channel = MethodChannel('com.example.myvlessvpn/vpn');
-  static const EventChannel _eventChannel = EventChannel('com.example.myvlessvpn/vpn_status');
+  static const MethodChannel _channel = MethodChannel('com.example.vpn_all/vpn');
+  static const EventChannel _eventChannel = EventChannel('com.example.vpn_all/vpn_status');
 
   static Stream<VpnState>? _statusStream;
 
