@@ -15,7 +15,11 @@ platform :ios do
     match(
       type: "appstore",
       readonly: false,
-      api_key: api_key
+      api_key: api_key,
+      app_identifier: [
+        "com.miaolian.myvpn",
+        "com.miaolian.myvpn.PacketTunnelExtension"
+      ]
     )
 
     update_code_signing_settings(
@@ -27,13 +31,23 @@ platform :ios do
       targets: ["Runner"]
     )
 
+    update_code_signing_settings(
+      use_automatic_signing: false,
+      path: "Runner.xcodeproj",
+      team_id: "85F7XUQB6K",
+      code_sign_identity: "Apple Distribution",
+      profile_name: "match AppStore com.miaolian.myvpn.PacketTunnelExtension",
+      targets: ["PacketTunnelExtension"]
+    )
+
     build_app(
       workspace: "Runner.xcworkspace",
       scheme: "Runner",
       export_method: "app-store",
       export_options: {
         provisioningProfiles: {
-          "com.miaolian.myvpn" => "match AppStore com.miaolian.myvpn"
+          "com.miaolian.myvpn" => "match AppStore com.miaolian.myvpn",
+          "com.miaolian.myvpn.PacketTunnelExtension" => "match AppStore com.miaolian.myvpn.PacketTunnelExtension"
         }
       }
     )
