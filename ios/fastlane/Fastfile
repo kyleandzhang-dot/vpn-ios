@@ -3,6 +3,8 @@ default_platform(:ios)
 platform :ios do
   desc "Build and upload to TestFlight"
   lane :beta do
+    setup_ci
+
     api_key = app_store_connect_api_key(
       key_id: ENV["APP_STORE_CONNECT_API_KEY_ID"],
       issuer_id: ENV["APP_STORE_CONNECT_API_ISSUER_ID"],
@@ -13,9 +15,7 @@ platform :ios do
     match(
       type: "appstore",
       readonly: false,
-      api_key: api_key,
-      keychain_name: "fastlane_match_keychain",
-      keychain_password: ENV["MATCH_PASSWORD"]
+      api_key: api_key
     )
 
     update_code_signing_settings(
