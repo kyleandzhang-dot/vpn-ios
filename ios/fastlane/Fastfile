@@ -16,6 +16,15 @@ platform :ios do
       api_key: api_key
     )
 
+    update_code_signing_settings(
+      use_automatic_signing: false,
+      path: "Runner.xcodeproj",
+      team_id: "85F7XUQB6K",
+      code_sign_identity: "Apple Distribution",
+      profile_name: "match AppStore com.miaolian.myvpn",
+      targets: ["Runner"]
+    )
+
     build_app(
       workspace: "Runner.xcworkspace",
       scheme: "Runner",
