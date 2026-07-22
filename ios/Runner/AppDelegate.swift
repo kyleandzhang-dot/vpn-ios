@@ -137,3 +137,11 @@ class VpnStatusStreamHandler: NSObject, FlutterStreamHandler {
 
   func onListen(withArguments arguments: Any?, eventSink events: @escaping FlutterEventSink) -> FlutterError? {
     appDelegate?.vpnEventSink = events
+    return nil
+  }
+
+  func onCancel(withArguments arguments: Any?) -> FlutterError? {
+    appDelegate?.vpnEventSink = nil
+    return nil
+  }
+}
