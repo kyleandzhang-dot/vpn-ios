@@ -220,7 +220,6 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
           setState(() {
             _expireText = "有效期至: ${data['expire_time']}";
           });
-          await VpnBridge.connect(_pendingNodeJson!);
         } else if (jsonBody['code'] == 403) {
           _cancelConnectTimeout();
           setState(() {
@@ -229,6 +228,7 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
           });
           _showToast("时长不足，请充值");
           _openRechargePage();
+          return;
         } else {
           _cancelConnectTimeout();
           _showToast(jsonBody['msg'] ?? "连接失败");
@@ -238,16 +238,47 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
             _statusType = "error";
             _ringAnimController.stop();
           });
+          return;
         }
+      } else {
+        _cancelConnectTimeout();
+        _showToast("获取节点失败: HTTP ${res.statusCode}");
+        setState(() {
+          _vpnState = VpnState.disconnected;
+          _statusText = "获取节点失败";
+          _statusType = "error";
+          _ringAnimController.stop();
+        });
+        return;
       }
     } catch (e) {
+      // 这里失败说明是 getNode() 这次 HTTP 请求/解析出的问题，
+      // 跟 VpnBridge.connect() 建隧道那一步无关。
+      debugPrint('[VPN] getNode 失败: $e');
       _cancelConnectTimeout();
       setState(() {
         _vpnState = VpnState.disconnected;
-        _statusText = "网络异常";
+        _statusText = "获取节点异常";
         _statusType = "error";
         _ringAnimController.stop();
       });
+      return;
+    }
+
+    try {
+      await VpnBridge.connect(_pendingNodeJson!);
+    } catch (e) {
+      // 这里失败说明是 iOS/Android 系统层面建立 VPN 隧道这一步炸的，
+      // 跟节点数据是否拿到无关，需要看原生日志（NetworkExtension/PacketTunnel）。
+      debugPrint('[VPN] VpnBridge.connect 失败: $e');
+      _cancelConnectTimeout();
+      setState(() {
+        _vpnState = VpnState.disconnected;
+        _statusText = "隧道建立失败";
+        _statusType = "error";
+        _ringAnimController.stop();
+      });
+      _showToast("VPN 隧道建立失败: $e");
     }
   }
 
@@ -276,7 +307,7 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Text(
-                _cfgAnnouncementTitle,
+                _cfgAnnouncement.isNotEmpty ? _cfgAnnouncementTitle : "公告",
                 style: const TextStyle(
                   fontSize: 18,
                   fontWeight: FontWeight.w600, 
@@ -286,7 +317,7 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
               ),
               const SizedBox(height: 20),
               Text(
-                _cfgAnnouncement,
+                _cfgAnnouncement.isNotEmpty ? _cfgAnnouncement : "暂无公告",
                 style: const TextStyle(
                   fontSize: 14,
                   color: Colors.black54,
@@ -444,8 +475,7 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
                 _buildBottomArea(),
               ],
             ),
-            if (!Platform.isIOS)
-              _buildFloatingCheckinButton(),
+            _buildFloatingCheckinButton(),
           ],
         ),
       ),
@@ -460,26 +490,25 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
           const Expanded(
             child: Text(AppConfig.appName, style: TextStyle(fontSize: 22, fontWeight: FontWeight.bold, color: AppConfig.colorPrimary)),
           ),
-          if (_cfgAnnouncement.isNotEmpty)
-            GestureDetector(
-              onTap: _showNoticeDialog,
-              child: Container(
-                margin: const EdgeInsets.only(right: 8),
-                padding: const EdgeInsets.all(8),
-                decoration: BoxDecoration(color: AppConfig.colorBtnBg, shape: BoxShape.circle, border: Border.all(color: AppConfig.colorBorder)),
-                child: Stack(
-                  clipBehavior: Clip.none,
-                  children: [
-                    const Icon(Icons.notifications_none, size: 20, color: AppConfig.colorPrimary),
-                    if (_showNoticeDot)
-                      Positioned(
-                        right: -2, top: -2,
-                        child: Container(width: 8, height: 8, decoration: const BoxDecoration(color: AppConfig.colorAlert, shape: BoxShape.circle)),
-                      )
-                  ],
-                ),
+          GestureDetector(
+            onTap: _showNoticeDialog,
+            child: Container(
+              margin: const EdgeInsets.only(right: 8),
+              padding: const EdgeInsets.all(8),
+              decoration: BoxDecoration(color: AppConfig.colorBtnBg, shape: BoxShape.circle, border: Border.all(color: AppConfig.colorBorder)),
+              child: Stack(
+                clipBehavior: Clip.none,
+                children: [
+                  const Icon(Icons.notifications_none, size: 20, color: AppConfig.colorPrimary),
+                  if (_showNoticeDot)
+                    Positioned(
+                      right: -2, top: -2,
+                      child: Container(width: 8, height: 8, decoration: const BoxDecoration(color: AppConfig.colorAlert, shape: BoxShape.circle)),
+                    )
+                ],
               ),
             ),
+          ),
           if (!Platform.isIOS)
             GestureDetector(
               onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const MarketScreen())),
