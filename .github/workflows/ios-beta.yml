@@ -13,7 +13,6 @@ env:
 jobs:
   # ------------------------------------------------------------------
   # Job 1: 编译 sing-box 的 Libbox.xcframework (采用压缩归档保存)
-  # 只有 SING_BOX_VERSION 变化时才会重新编译（靠 cache key 命中判断）
   # ------------------------------------------------------------------
   build-libbox:
     runs-on: macos-14
@@ -24,12 +23,13 @@ jobs:
       CGO_ENABLED: 1
       GOFLAGS: -ldflags=-linkmode=external
     steps:
+      # 升级为 v4 强制使旧的错误缓存失效，重新编译并以正确格式打包
       - name: Cache libbox archive
         id: cache-libbox
         uses: actions/cache@v4
         with:
           path: libbox-output/Libbox.xcframework.zip
-          key: libbox-${{ env.SING_BOX_VERSION }}-v3-${{ runner.os }}
+          key: libbox-${{ env.SING_BOX_VERSION }}-v4-${{ runner.os }}
 
       - name: Set up Go 1.22
         if: steps.cache-libbox.outputs.cache-hit != 'true'
@@ -57,8 +57,8 @@ jobs:
         run: |
           git clone --branch ${{ env.SING_BOX_VERSION }} --depth 1 https://github.com/SagerNet/sing-box.git
 
-      # 使用 $GITHUB_WORKSPACE 绝对路径确保压缩包精准生成到指定位置
-      - name: Build and Zip Libbox.xcframework
+      # 使用 -y 参数强制保留 Apple Framework 内部的符号链接(Symlinks)，配合绝对路径精准打包
+      - name: Build and Archive Libbox.xcframework
         if: steps.cache-libbox.outputs.cache-hit != 'true'
         working-directory: sing-box
         run: |
@@ -71,7 +71,7 @@ jobs:
             exit 1
           fi
           cd $(dirname "$FRAMEWORK_PATH")
-          zip -r $GITHUB_WORKSPACE/libbox-output/Libbox.xcframework.zip $(basename "$FRAMEWORK_PATH")
+          zip -r -y $GITHUB_WORKSPACE/libbox-output/Libbox.xcframework.zip $(basename "$FRAMEWORK_PATH")
 
       - name: Upload libbox artifact
         uses: actions/upload-artifact@v4
@@ -81,7 +81,7 @@ jobs:
           retention-days: 7
 
   # ------------------------------------------------------------------
-  # Job 2: 原有的 Flutter iOS 构建流程，加入 zip 解压与格式校验步骤
+  # Job 2: 原有的 Flutter iOS 构建流程，加入旧目录清理与 zip 解压步骤
   # ------------------------------------------------------------------
   build:
     needs: build-libbox
@@ -121,10 +121,12 @@ jobs:
           name: libbox-archive
           path: ./temp-libbox
 
+      # 先 rm -rf 彻底清理可能存在的冲突目录，再静默覆盖解压，并验证 plist 语法
       - name: Extract and verify libbox framework
         run: |
           mkdir -p ios
-          unzip -o ./temp-libbox/Libbox.xcframework.zip -d ios/
+          rm -rf ios/Libbox.xcframework
+          unzip -q -o ./temp-libbox/Libbox.xcframework.zip -d ios/
           ls -la ios/Libbox.xcframework
           plutil -lint ios/Libbox.xcframework/Info.plist
 
