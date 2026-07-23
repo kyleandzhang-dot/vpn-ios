@@ -129,11 +129,30 @@ private class TunnelPlatformInterface: NSObject, LibboxPlatformInterfaceProtocol
     func closeDefaultInterfaceMonitor(_ listener: LibboxInterfaceUpdateListenerProtocol?) throws {
     }
 
-    // 适配 sing-box v1.10.x：方法名已从 usePlatformInterfaceGetter 改为 useGetter
+    // MARK: - 接口获取适配
+    // 适配 sing-box v1.10.x+：方法名已从 usePlatformInterfaceGetter 改为 useGetter
     func useGetter() -> Bool {
         return false
     }
 
+    // 同时保留旧版方法名，确保代码向上/向下兼容不同的内核构建版本
+    func usePlatformInterfaceGetter() -> Bool {
+        return false
+    }
+
+    // MARK: - 系统代理适配 (sing-box v1.10+ 新增强制必现方法)
+    func usePlatformSystemProxy() -> Bool {
+        return false
+    }
+
+    func setSystemProxy(_ enabled: Bool, server: String?, port: Int32) throws {
+        // iOS VPN 隧道环境下无需操作系统代理，留空即可
+    }
+
+    func clearSystemProxy() throws {
+    }
+
+    // MARK: - 其他原有方法
     // @objc 的 throws 方法成功时必须返回非空实体，这里直接抛出未实现异常，完美满足桥接协议规范
     func getInterfaces() throws -> LibboxNetworkInterfaceIteratorProtocol {
         throw NSError(domain: "LibboxPlatformInterface", code: 1, userInfo: [NSLocalizedDescriptionKey: "iOS 平台不需要接口迭代器"])
