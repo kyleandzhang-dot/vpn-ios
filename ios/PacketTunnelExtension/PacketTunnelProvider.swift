@@ -4,12 +4,10 @@ import Darwin
 
 class PacketTunnelProvider: NEPacketTunnelProvider {
 
-    // 修复 Error #1: 在最新版 libbox 中，服务类型已从 LibboxBoxServiceProtocol 改为 LibboxBoxService 类
     private var service: LibboxBoxService?
     private var platformInterface: TunnelPlatformInterface?
 
     override func startTunnel(options: [String : NSObject]?, completionHandler: @escaping (Error?) -> Void) {
-        // 从主 App 传入的 providerConfiguration 提取 node_json
         guard let conf = (protocolConfiguration as? NETunnelProviderProtocol)?.providerConfiguration,
               let nodeJson = conf["node_json"] as? String else {
             completionHandler(NSError(domain: "PacketTunnel", code: 1, userInfo: [NSLocalizedDescriptionKey: "缺少 node_json 配置"]))
@@ -17,14 +15,13 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
         }
 
         do {
-            // 使用你的 SingBoxConfigBuilder 转换为 sing-box 标准 JSON 配置
             let configJson = try SingBoxConfigBuilder.build(fromNodeJson: nodeJson)
 
             let interface = TunnelPlatformInterface(provider: self)
             self.platformInterface = interface
 
-            // 修复 Error #4: 使用干净的标准初始化，不需要传递额外废弃参数
-            let service = try LibboxNewService(configJson, interface)
+            // 修复 Missing argument for parameter #3：v1.11.0 增加了独立的 PlatformLogWriter 参数
+            let service = try LibboxNewService(configJson, interface, interface)
             try service.start()
             self.service = service
 
@@ -46,8 +43,6 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
         completionHandler()
     }
 
-    // 修复 Error #5: 不再尝试去强转容易报错的 LibboxRoutePrefixIteratorProtocol 迭代器，
-    // 直接针对我们在 SingBoxConfigBuilder 里配置好的 172.19.0.1/30 建立干净的全局网卡
     fileprivate func openTun(options: LibboxTunOptions) -> Int32 {
         var tunFd: Int32 = -1
         let semaphore = DispatchSemaphore(value: 0)
@@ -67,7 +62,6 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
             if let error = error {
                 NSLog("[Tunnel] 设置网络参数失败: %@", error.localizedDescription)
             } else if let self = self {
-                // 利用 KVC 取出 iOS 底层实际生成的虚拟网卡 Socket 文件描述符交给 Go 内核
                 if let fd = self.packetFlow.value(forKeyPath: "socket.fileDescriptor") as? Int32 {
                     tunFd = fd
                 }
@@ -80,8 +74,8 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
     }
 }
 
-// 修复 Error #3: 严格按照 v1.11.0 的新 API 要求实现 LibboxPlatformInterfaceProtocol
-private class TunnelPlatformInterface: NSObject, LibboxPlatformInterfaceProtocol {
+// 同时遵循 LibboxPlatformInterfaceProtocol 和 v1.11.0 拆分出的日志协议 LibboxPlatformLogWriterProtocol
+private class TunnelPlatformInterface: NSObject, LibboxPlatformInterfaceProtocol, LibboxPlatformLogWriterProtocol {
     private weak var provider: PacketTunnelProvider?
 
     init(provider: PacketTunnelProvider) {
@@ -89,13 +83,15 @@ private class TunnelPlatformInterface: NSObject, LibboxPlatformInterfaceProtocol
         super.init()
     }
 
-    func usePlatformAutoDetectInterfaceControl() -> Bool {
+    // 1. 修复重命名：usePlatformAutoDetectControl / autoDetectControl
+    func usePlatformAutoDetectControl() -> Bool {
         return false
     }
 
-    func autoDetectInterfaceControl(_ fd: Int32) throws {
+    func autoDetectControl(_ fd: Int32) throws {
     }
 
+    // 2. openTun
     func openTun(_ options: LibboxTunOptions?) throws -> Int32 {
         guard let provider = provider, let options = options else {
             return -1
@@ -103,6 +99,7 @@ private class TunnelPlatformInterface: NSObject, LibboxPlatformInterfaceProtocol
         return provider.openTun(options: options)
     }
 
+    // 3. ProcFS & ConnectionOwner
     func useProcFS() -> Bool {
         return false
     }
@@ -115,11 +112,11 @@ private class TunnelPlatformInterface: NSObject, LibboxPlatformInterfaceProtocol
         return ""
     }
 
-    // 修复 Error #2: 方法名从 uidByPackageName 对齐修改为最新的 uid(byPackageName:ret0_:)
     func uid(byPackageName packageName: String?, ret0_: UnsafeMutablePointer<Int32>?) throws -> Bool {
         return false
     }
 
+    // 4. Interface monitor
     func usePlatformDefaultInterfaceMonitor() -> Bool {
         return false
     }
@@ -130,14 +127,16 @@ private class TunnelPlatformInterface: NSObject, LibboxPlatformInterfaceProtocol
     func closeDefaultInterfaceMonitor(_ listener: LibboxInterfaceUpdateListenerProtocol?) throws {
     }
 
+    // 5. 修复返回值类型：v1.11.0 将 InterfaceIterator 重命名为了 LibboxNetworkInterfaceIteratorProtocol
     func usePlatformInterfaceGetter() -> Bool {
         return false
     }
 
-    func getInterfaces() throws -> LibboxInterfaceIteratorProtocol? {
+    func getInterfaces() throws -> LibboxNetworkInterfaceIteratorProtocol? {
         return nil
     }
 
+    // 6. Network Extension flags
     func underNetworkExtension() -> Bool {
         return true
     }
@@ -153,6 +152,7 @@ private class TunnelPlatformInterface: NSObject, LibboxPlatformInterfaceProtocol
         return nil
     }
 
+    // 7. 遵循 LibboxPlatformLogWriterProtocol 接口，将内核日志转入 iOS 系统控制台
     func writeLog(_ message: String?) {
         if let msg = message {
             NSLog("[Libbox] %@", msg)
