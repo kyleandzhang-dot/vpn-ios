@@ -9,16 +9,19 @@ on:
 env:
   # 固定 sing-box 版本号，避免上游发新版把你的 CI 跑挂
   SING_BOX_VERSION: v1.11.0
-  # 两个 job 统一固定同一个 macOS runner 版本，避免生成 xcframework 和
-  # 实际读取它的 Xcode 版本不一致（这很可能是本次 Info.plist 解析失败的原因之一）
-  MACOS_RUNNER: macos-14
+  # 显式锁定 Xcode 版本号（而不是依赖 runner 默认版本）。
+  # macos-14 即将被 GitHub 弃用且 Xcode 版本偏老，无法打开
+  # Xcode 16+ 生成的新版工程文件格式；这里统一用 macos-15 +
+  # 固定的 Xcode 16.4，两个 job 保持完全一致，避免"生成 xcframework
+  # 的 Xcode"和"实际读取/编译的 Xcode"版本不同步。
+  XCODE_VERSION: '16.4'
 
 jobs:
   # ------------------------------------------------------------------
   # Job 1: 编译 sing-box 的 Libbox.xcframework (采用压缩归档保存)
   # ------------------------------------------------------------------
   build-libbox:
-    runs-on: macos-14
+    runs-on: macos-15
     timeout-minutes: 30
     outputs:
       cache-hit: ${{ steps.cache-libbox.outputs.cache-hit }}
@@ -26,6 +29,11 @@ jobs:
       CGO_ENABLED: 1
       GOFLAGS: -ldflags=-linkmode=external
     steps:
+      - name: Select Xcode ${{ env.XCODE_VERSION }}
+        uses: maxim-lobanov/setup-xcode@v1
+        with:
+          xcode-version: ${{ env.XCODE_VERSION }}
+
       # 升级为 v5：因为 actions/cache 的保存动作是 job 结束时自动触发的
       # post 步骤，不会检查整个 job 是否成功——哪怕产出的 zip 是坏的，
       # 只要文件存在就会被缓存下来，之后每次都会命中同一份坏缓存。
