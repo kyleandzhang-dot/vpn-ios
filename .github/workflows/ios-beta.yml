@@ -6,8 +6,93 @@ on:
     branches:
       - main
 
+env:
+  # 固定 sing-box 版本号，避免上游发新版把你的 CI 跑挂
+  SING_BOX_VERSION: v1.11.0
+
 jobs:
+  # ------------------------------------------------------------------
+  # Job 1: 编译 sing-box 的 Libbox.xcframework
+  # 只有 SING_BOX_VERSION 变化时才会重新编译（靠 cache key 命中判断）
+  # ------------------------------------------------------------------
+  build-libbox:
+    # 锁定 macos-14，避开 macos-latest 已指向 macOS Tahoe (15/26) 后
+    # 对 Mach-O 可执行文件强制要求 LC_UUID load command 的问题
+    # （Go 内部链接器编译出的临时二进制不带 LC_UUID，会被 dyld 直接拒绝启动）
+    runs-on: macos-14
+    timeout-minutes: 30
+    outputs:
+      cache-hit: ${{ steps.cache-libbox.outputs.cache-hit }}
+    env:
+      # 双保险：即便以后 macos-14 也被下线/升级，全局强制走系统外部链接器
+      # （会生成带 LC_UUID 的二进制），覆盖 sing-box Makefile 内部自己跑的
+      # `go run`，而不只是我们手动 go install 的 gomobile/gobind
+      CGO_ENABLED: 1
+      GOFLAGS: -ldflags=-linkmode=external
+    steps:
+      - name: Cache libbox xcframework
+        id: cache-libbox
+        uses: actions/cache@v4
+        with:
+          path: libbox-output/Libbox.xcframework
+          key: libbox-${{ env.SING_BOX_VERSION }}-v2-${{ runner.os }}
+
+      - name: Set up Go 1.22
+        if: steps.cache-libbox.outputs.cache-hit != 'true'
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.22'
+
+      # sing-box 用的是 sagernet 自己 fork 的 gomobile（锁定 v0.1.4），
+      # 不是官方 golang.org/x/mobile。用外部 linker + ad-hoc 签名，
+      # 避免在较新 macOS SDK 上出现 "missing LC_UUID load command" 崩溃
+      - name: Install sagernet/gomobile toolchain
+        if: steps.cache-libbox.outputs.cache-hit != 'true'
+        env:
+          CGO_ENABLED: 1
+        run: |
+          go install -ldflags="-linkmode=external" -v github.com/sagernet/gomobile/cmd/gomobile@v0.1.4
+          go install -ldflags="-linkmode=external" -v github.com/sagernet/gomobile/cmd/gobind@v0.1.4
+          codesign -s - "$(go env GOPATH)/bin/gomobile"
+          codesign -s - "$(go env GOPATH)/bin/gobind"
+          echo "$(go env GOPATH)/bin" >> "$GITHUB_PATH"
+
+      - name: gomobile init
+        if: steps.cache-libbox.outputs.cache-hit != 'true'
+        run: gomobile init
+
+      - name: Clone sing-box
+        if: steps.cache-libbox.outputs.cache-hit != 'true'
+        run: |
+          git clone --branch ${{ env.SING_BOX_VERSION }} --depth 1 https://github.com/SagerNet/sing-box.git
+
+      - name: Build Libbox.xcframework
+        if: steps.cache-libbox.outputs.cache-hit != 'true'
+        working-directory: sing-box
+        run: |
+          make lib_ios
+          mkdir -p ../libbox-output
+          # 产出路径以实际 build 日志为准，这里做一次全局查找兜底
+          FRAMEWORK_PATH=$(find . -iname "Libbox.xcframework" -maxdepth 3 | head -n 1)
+          if [ -z "$FRAMEWORK_PATH" ]; then
+            echo "找不到 Libbox.xcframework，请检查 build 日志确认实际产出路径"
+            find . -iname "*.xcframework"
+            exit 1
+          fi
+          cp -R "$FRAMEWORK_PATH" ../libbox-output/Libbox.xcframework
+
+      - name: Upload libbox artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: libbox-xcframework
+          path: libbox-output/Libbox.xcframework
+          retention-days: 7
+
+  # ------------------------------------------------------------------
+  # Job 2: 原有的 Flutter iOS 构建流程，加入 libbox 拷贝步骤
+  # ------------------------------------------------------------------
   build:
+    needs: build-libbox
     runs-on: macos-latest
     timeout-minutes: 30
 
@@ -32,6 +117,21 @@ jobs:
       - name: Install Flutter dependencies
         run: flutter pub get
 
+      - name: Set build number
+        run: |
+          VERSION_NAME=$(grep '^version:' pubspec.yaml | sed 's/version: //' | cut -d '+' -f 1)
+          sed -i.bak "s/^version: .*/version: ${VERSION_NAME}+${{ github.run_number }}/" pubspec.yaml
+          cat pubspec.yaml | grep version
+
+      - name: Download libbox artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: libbox-xcframework
+          path: ios/Frameworks/Libbox.xcframework
+
+      - name: Verify libbox framework
+        run: ls -la ios/Frameworks/Libbox.xcframework
+
       - name: Cache CocoaPods
         uses: actions/cache@v4
         with:
@@ -41,6 +141,14 @@ jobs:
           key: ${{ runner.os }}-pods-${{ hashFiles('ios/Podfile.lock') }}
           restore-keys: |
             ${{ runner.os }}-pods-
+
+      - name: Cache DerivedData
+        uses: actions/cache@v4
+        with:
+          path: ~/Library/Developer/Xcode/DerivedData
+          key: ${{ runner.os }}-derived-${{ hashFiles('**/*.swift', '**/*.m', '**/*.dart') }}
+          restore-keys: |
+            ${{ runner.os }}-derived-
 
       - name: Build Flutter iOS (no codesign)
         run: flutter build ios --release --no-codesign
