@@ -12,30 +12,25 @@ env:
 
 jobs:
   # ------------------------------------------------------------------
-  # Job 1: 编译 sing-box 的 Libbox.xcframework
+  # Job 1: 编译 sing-box 的 Libbox.xcframework (采用压缩归档保存)
   # 只有 SING_BOX_VERSION 变化时才会重新编译（靠 cache key 命中判断）
   # ------------------------------------------------------------------
   build-libbox:
-    # 锁定 macos-14，避开 macos-latest 已指向 macOS Tahoe (15/26) 后
-    # 对 Mach-O 可执行文件强制要求 LC_UUID load command 的问题
-    # （Go 内部链接器编译出的临时二进制不带 LC_UUID，会被 dyld 直接拒绝启动）
     runs-on: macos-14
     timeout-minutes: 30
     outputs:
       cache-hit: ${{ steps.cache-libbox.outputs.cache-hit }}
     env:
-      # 双保险：即便以后 macos-14 也被下线/升级，全局强制走系统外部链接器
-      # （会生成带 LC_UUID 的二进制），覆盖 sing-box Makefile 内部自己跑的
-      # `go run`，而不只是我们手动 go install 的 gomobile/gobind
       CGO_ENABLED: 1
       GOFLAGS: -ldflags=-linkmode=external
     steps:
-      - name: Cache libbox xcframework
+      # 【修改处 1】：将缓存路径改为 zip 压缩包，彻底防止跨环境损坏
+      - name: Cache libbox archive
         id: cache-libbox
         uses: actions/cache@v4
         with:
-          path: libbox-output/Libbox.xcframework
-          key: libbox-${{ env.SING_BOX_VERSION }}-v2-${{ runner.os }}
+          path: libbox-output/Libbox.xcframework.zip
+          key: libbox-${{ env.SING_BOX_VERSION }}-v3-${{ runner.os }} # 升级为v3让旧缓存失效
 
       - name: Set up Go 1.22
         if: steps.cache-libbox.outputs.cache-hit != 'true'
@@ -43,9 +38,6 @@ jobs:
         with:
           go-version: '1.22'
 
-      # sing-box 用的是 sagernet 自己 fork 的 gomobile（锁定 v0.1.4），
-      # 不是官方 golang.org/x/mobile。用外部 linker + ad-hoc 签名，
-      # 避免在较新 macOS SDK 上出现 "missing LC_UUID load command" 崩溃
       - name: Install sagernet/gomobile toolchain
         if: steps.cache-libbox.outputs.cache-hit != 'true'
         env:
@@ -66,30 +58,34 @@ jobs:
         run: |
           git clone --branch ${{ env.SING_BOX_VERSION }} --depth 1 https://github.com/SagerNet/sing-box.git
 
-      - name: Build Libbox.xcframework
+      # 【修改处 2】：编译完立马打包成 zip，绝不把散件直接暴露给下游
+      - name: Build and Zip Libbox.xcframework
         if: steps.cache-libbox.outputs.cache-hit != 'true'
         working-directory: sing-box
         run: |
           make lib_ios
           mkdir -p ../libbox-output
-          # 产出路径以实际 build 日志为准，这里做一次全局查找兜底
           FRAMEWORK_PATH=$(find . -iname "Libbox.xcframework" -maxdepth 3 | head -n 1)
           if [ -z "$FRAMEWORK_PATH" ]; then
             echo "找不到 Libbox.xcframework，请检查 build 日志确认实际产出路径"
             find . -iname "*.xcframework"
             exit 1
           fi
-          cp -R "$FRAMEWORK_PATH" ../libbox-output/Libbox.xcframework
+          
+          # 进入输出目录将其压缩为 zip，保留完整的 plist 与 macOS 特殊属性
+          cd $(dirname "$FRAMEWORK_PATH")
+          zip -r ../../../../libbox-output/Libbox.xcframework.zip $(basename "$FRAMEWORK_PATH")
 
+      # 【修改处 3】：上传的是 zip 文件，而不是整个目录
       - name: Upload libbox artifact
         uses: actions/upload-artifact@v4
         with:
-          name: libbox-xcframework
-          path: libbox-output/Libbox.xcframework
+          name: libbox-archive
+          path: libbox-output/Libbox.xcframework.zip
           retention-days: 7
 
   # ------------------------------------------------------------------
-  # Job 2: 原有的 Flutter iOS 构建流程，加入 libbox 拷贝步骤
+  # Job 2: 原有的 Flutter iOS 构建流程，加入 zip 解压与格式校验步骤
   # ------------------------------------------------------------------
   build:
     needs: build-libbox
@@ -123,14 +119,25 @@ jobs:
           sed -i.bak "s/^version: .*/version: ${VERSION_NAME}+${{ github.run_number }}/" pubspec.yaml
           cat pubspec.yaml | grep version
 
+      # 【修改处 4】：下载之前压缩好的 zip 文件
       - name: Download libbox artifact
         uses: actions/download-artifact@v4
         with:
-          name: libbox-xcframework
-          path: ios/Frameworks/Libbox.xcframework
+          name: libbox-archive
+          path: ./temp-libbox
 
-      - name: Verify libbox framework
-        run: ls -la ios/Frameworks/Libbox.xcframework
+      # 【修改处 5】：将其解压到你的目标路径下（跟你项目中报错的路径对齐），且强制验证 plist 完整性
+      - name: Extract and verify libbox framework
+        run: |
+          # 确保解压目标父路径存在，之前报错在 ios/Libbox.xcframework，所以解压到 ios/ 目录下
+          mkdir -p ios
+          unzip -o ./temp-libbox/Libbox.xcframework.zip -d ios/
+          
+          # 验证解压是否成功
+          ls -la ios/Libbox.xcframework
+          
+          # 【双重保险】：使用系统工具检查解压出的 Info.plist 语法是否完全健康，防止 Xcode 编译直接变炸
+          plutil -lint ios/Libbox.xcframework/Info.plist
 
       - name: Cache CocoaPods
         uses: actions/cache@v4
