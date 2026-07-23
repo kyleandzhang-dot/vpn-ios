@@ -129,7 +129,8 @@ private class TunnelPlatformInterface: NSObject, LibboxPlatformInterfaceProtocol
     func closeDefaultInterfaceMonitor(_ listener: LibboxInterfaceUpdateListenerProtocol?) throws {
     }
 
-    func usePlatformInterfaceGetter() -> Bool {
+    // 适配 sing-box v1.10.x：方法名已从 usePlatformInterfaceGetter 改为 useGetter
+    func useGetter() -> Bool {
         return false
     }
 
