@@ -20,7 +20,6 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
             let interface = TunnelPlatformInterface(provider: self)
             self.platformInterface = interface
 
-            // LibboxNewService 为 C 语言全局导出函数，第三个参数必须传 &err 错误指针
             var err: NSError?
             guard let service = LibboxNewService(configJson, interface, &err) else {
                 if let err = err {
@@ -129,7 +128,7 @@ private class TunnelPlatformInterface: NSObject, LibboxPlatformInterfaceProtocol
     func closeDefaultInterfaceMonitor(_ listener: LibboxInterfaceUpdateListenerProtocol?) throws {
     }
 
-    // MARK: - 接口迭代器适配 (同时兼容 v1.10 和 v1.11 新旧命名)
+    // 适配 v1.10.7：新旧接口名同时保留
     func useGetter() -> Bool {
         return false
     }
@@ -142,36 +141,17 @@ private class TunnelPlatformInterface: NSObject, LibboxPlatformInterfaceProtocol
         throw NSError(domain: "LibboxPlatformInterface", code: 1, userInfo: [NSLocalizedDescriptionKey: "iOS 平台不需要接口迭代器"])
     }
 
-    // MARK: - 系统代理适配 (sing-box v1.10+ 新增强制接口)
+    // 系统代理适配
     func usePlatformSystemProxy() -> Bool {
         return false
     }
 
     func setSystemProxy(_ enabled: Bool, server: String?, port: Int32) throws {
-        // iOS VPN 隧道环境下无需操作系统代理，留空即可
     }
 
     func clearSystemProxy() throws {
     }
 
-    // MARK: - 系统 DNS 与路由表适配 (sing-box v1.10+ / v1.11+ 新增强制接口)
-    func usePlatformSystemDNS() -> Bool {
-        return false
-    }
-
-    func readSystemDNS() throws -> LibboxSystemDNSIteratorProtocol {
-        throw NSError(domain: "LibboxPlatformInterface", code: 1, userInfo: [NSLocalizedDescriptionKey: "iOS 平台不需要系统 DNS 迭代器"])
-    }
-
-    func usePlatformRoutingTable() -> Bool {
-        return false
-    }
-
-    func readRoutingTable() throws -> LibboxRoutingTableIteratorProtocol {
-        throw NSError(domain: "LibboxPlatformInterface", code: 1, userInfo: [NSLocalizedDescriptionKey: "iOS 平台不需要路由表迭代器"])
-    }
-
-    // MARK: - 网络拓展与日志
     func underNetworkExtension() -> Bool {
         return true
     }

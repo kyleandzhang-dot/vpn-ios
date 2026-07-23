@@ -171,6 +171,13 @@ jobs:
             exit 1
           fi
 
+      # 【新增】直接打印 framework 头文件中 LibboxPlatformInterfaceProtocol 真正要求的方法
+      - name: Dump exact LibboxPlatformInterfaceProtocol requirements
+        run: |
+          echo "==================== 正在读取底层真正要求的协议方法 ===================="
+          grep -A 35 "@protocol LibboxPlatformInterfaceProtocol" ios/Libbox.xcframework/*/Libbox.framework/Headers/*.h || true
+          echo "=========================================================================="
+
       - name: Cache CocoaPods
         uses: actions/cache@v4
         with:
@@ -189,9 +196,14 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-derived-
 
-      # 注意末尾加上了 -v 参数：就算以后更新内核版本再次遇到协议缺失，日志也会完整输出 "note: protocol requires..."
+      # 【新增】绕过 Flutter CLI 的 JSON 拦截，用原生 xcodebuild 直接打印缺少的 note 提示
+      - name: Debug Swift Extension with raw xcodebuild
+        run: |
+          cd ios
+          xcodebuild -workspace Runner.xcworkspace -scheme PacketTunnelExtension -configuration Release build CODE_SIGNING_ALLOWED=NO || true
+
       - name: Build Flutter iOS (no codesign)
-        run: flutter build ios --release --no-codesign -v
+        run: flutter build ios --release --no-codesign
 
       - name: Set up Ruby
         uses: ruby/setup-ruby@v1
