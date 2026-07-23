@@ -9,6 +9,9 @@ on:
 env:
   # 固定 sing-box 版本号，避免上游发新版把你的 CI 跑挂
   SING_BOX_VERSION: v1.11.0
+  # 两个 job 统一固定同一个 macOS runner 版本，避免生成 xcframework 和
+  # 实际读取它的 Xcode 版本不一致（这很可能是本次 Info.plist 解析失败的原因之一）
+  MACOS_RUNNER: macos-14
 
 jobs:
   # ------------------------------------------------------------------
@@ -23,13 +26,16 @@ jobs:
       CGO_ENABLED: 1
       GOFLAGS: -ldflags=-linkmode=external
     steps:
-      # 升级为 v4 强制使旧的错误缓存失效，重新编译并以正确格式打包
+      # 升级为 v5：因为 actions/cache 的保存动作是 job 结束时自动触发的
+      # post 步骤，不会检查整个 job 是否成功——哪怕产出的 zip 是坏的，
+      # 只要文件存在就会被缓存下来，之后每次都会命中同一份坏缓存。
+      # 所以每次怀疑产物有问题，都应该把这个版本号再往上提一次。
       - name: Cache libbox archive
         id: cache-libbox
         uses: actions/cache@v4
         with:
           path: libbox-output/Libbox.xcframework.zip
-          key: libbox-${{ env.SING_BOX_VERSION }}-v4-${{ runner.os }}
+          key: libbox-${{ env.SING_BOX_VERSION }}-v5-${{ runner.os }}
 
       - name: Set up Go 1.22
         if: steps.cache-libbox.outputs.cache-hit != 'true'
@@ -57,21 +63,54 @@ jobs:
         run: |
           git clone --branch ${{ env.SING_BOX_VERSION }} --depth 1 https://github.com/SagerNet/sing-box.git
 
-      # 使用 -y 参数强制保留 Apple Framework 内部的符号链接(Symlinks)，配合绝对路径精准打包
-      - name: Build and Archive Libbox.xcframework
+      - name: Build Libbox.xcframework
         if: steps.cache-libbox.outputs.cache-hit != 'true'
         working-directory: sing-box
         run: |
+          set -e
           make lib_ios
-          mkdir -p $GITHUB_WORKSPACE/libbox-output
           FRAMEWORK_PATH=$(find . -iname "Libbox.xcframework" -maxdepth 3 | head -n 1)
           if [ -z "$FRAMEWORK_PATH" ]; then
             echo "找不到 Libbox.xcframework，请检查 build 日志确认实际产出路径"
             find . -iname "*.xcframework"
             exit 1
           fi
+          echo "FRAMEWORK_PATH=$FRAMEWORK_PATH" >> "$GITHUB_ENV"
+
+      # 关键调试步骤：在打包之前，先确认 gomobile 生成的 Info.plist
+      # 本身是不是合法的 XCFramework 清单。如果这一步打印出来的内容
+      # 就已经缺 AvailableLibraries 等字段，说明问题出在 gomobile/Xcode
+      # 版本兼容性，跟后面的 zip/缓存逻辑无关。
+      - name: Debug Info.plist before zipping
+        if: steps.cache-libbox.outputs.cache-hit != 'true'
+        working-directory: sing-box
+        run: |
+          echo "== Xcode 版本 =="
+          xcodebuild -version
+          echo "== 文件类型 =="
+          file "$FRAMEWORK_PATH/Info.plist"
+          echo "== plist 内容（转成 xml 方便阅读）=="
+          plutil -convert xml1 -o - "$FRAMEWORK_PATH/Info.plist"
+          echo "== 是否包含 AvailableLibraries 关键字段 =="
+          if plutil -convert xml1 -o - "$FRAMEWORK_PATH/Info.plist" | grep -q "AvailableLibraries"; then
+            echo "OK: 包含 AvailableLibraries"
+          else
+            echo "警告: 未找到 AvailableLibraries，这份 xcframework 很可能是不完整/格式不对的"
+            exit 1
+          fi
+
+      # 使用 -y 参数强制保留 Apple Framework 内部的符号链接(Symlinks)，配合绝对路径精准打包
+      - name: Archive Libbox.xcframework
+        if: steps.cache-libbox.outputs.cache-hit != 'true'
+        working-directory: sing-box
+        run: |
+          set -e
+          mkdir -p $GITHUB_WORKSPACE/libbox-output
           cd $(dirname "$FRAMEWORK_PATH")
           zip -r -y $GITHUB_WORKSPACE/libbox-output/Libbox.xcframework.zip $(basename "$FRAMEWORK_PATH")
+          # 打包完立刻自检一次压缩包本身是否完整，避免把坏包缓存/上传出去
+          cd $GITHUB_WORKSPACE
+          unzip -t libbox-output/Libbox.xcframework.zip > /dev/null
 
       - name: Upload libbox artifact
         uses: actions/upload-artifact@v4
@@ -85,7 +124,7 @@ jobs:
   # ------------------------------------------------------------------
   build:
     needs: build-libbox
-    runs-on: macos-latest
+    runs-on: macos-14
     timeout-minutes: 30
 
     steps:
@@ -121,14 +160,25 @@ jobs:
           name: libbox-archive
           path: ./temp-libbox
 
-      # 先 rm -rf 彻底清理可能存在的冲突目录，再静默覆盖解压，并验证 plist 语法
+      # 先 rm -rf 彻底清理可能存在的冲突目录，再静默覆盖解压，并验证 plist 语法+语义
       - name: Extract and verify libbox framework
         run: |
+          set -e
           mkdir -p ios
           rm -rf ios/Libbox.xcframework
           unzip -q -o ./temp-libbox/Libbox.xcframework.zip -d ios/
           ls -la ios/Libbox.xcframework
+          echo "== Xcode 版本（用于实际读取 xcframework 的这台 runner）=="
+          xcodebuild -version
+          echo "== 文件类型 =="
+          file ios/Libbox.xcframework/Info.plist
+          echo "== 语法检查 =="
           plutil -lint ios/Libbox.xcframework/Info.plist
+          echo "== 语义检查：是否包含 AvailableLibraries =="
+          if ! plutil -convert xml1 -o - ios/Libbox.xcframework/Info.plist | grep -q "AvailableLibraries"; then
+            echo "错误: Info.plist 缺少 AvailableLibraries，xcframework 不完整"
+            exit 1
+          fi
 
       - name: Cache CocoaPods
         uses: actions/cache@v4
