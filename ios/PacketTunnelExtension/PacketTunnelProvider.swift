@@ -20,8 +20,15 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
             let interface = TunnelPlatformInterface(provider: self)
             self.platformInterface = interface
 
-            // 修复 Missing argument for parameter #3：v1.11.0 增加了独立的 PlatformLogWriter 参数
-            let service = try LibboxNewService(configJson, interface, interface)
+            // 修复 Error #6: LibboxNewService 为全局 C 函数，第三个参数是 Objective-C 的错误指针 &err
+            var err: NSError?
+            guard let service = LibboxNewService(configJson, interface, &err) else {
+                if let err = err {
+                    throw err
+                }
+                throw NSError(domain: "PacketTunnel", code: 2, userInfo: [NSLocalizedDescriptionKey: "创建 Libbox 内核服务失败"])
+            }
+
             try service.start()
             self.service = service
 
@@ -74,8 +81,8 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
     }
 }
 
-// 同时遵循 LibboxPlatformInterfaceProtocol 和 v1.11.0 拆分出的日志协议 LibboxPlatformLogWriterProtocol
-private class TunnelPlatformInterface: NSObject, LibboxPlatformInterfaceProtocol, LibboxPlatformLogWriterProtocol {
+// 修复 Error #1: WriteLog 是 LibboxPlatformInterfaceProtocol 自带的方法，无需实现不存在的 LogWriter 协议
+private class TunnelPlatformInterface: NSObject, LibboxPlatformInterfaceProtocol {
     private weak var provider: PacketTunnelProvider?
 
     init(provider: PacketTunnelProvider) {
@@ -83,7 +90,6 @@ private class TunnelPlatformInterface: NSObject, LibboxPlatformInterfaceProtocol
         super.init()
     }
 
-    // 1. 修复重命名：usePlatformAutoDetectControl / autoDetectControl
     func usePlatformAutoDetectControl() -> Bool {
         return false
     }
@@ -91,7 +97,6 @@ private class TunnelPlatformInterface: NSObject, LibboxPlatformInterfaceProtocol
     func autoDetectControl(_ fd: Int32) throws {
     }
 
-    // 2. openTun
     func openTun(_ options: LibboxTunOptions?) throws -> Int32 {
         guard let provider = provider, let options = options else {
             return -1
@@ -99,7 +104,6 @@ private class TunnelPlatformInterface: NSObject, LibboxPlatformInterfaceProtocol
         return provider.openTun(options: options)
     }
 
-    // 3. ProcFS & ConnectionOwner
     func useProcFS() -> Bool {
         return false
     }
@@ -116,7 +120,6 @@ private class TunnelPlatformInterface: NSObject, LibboxPlatformInterfaceProtocol
         return false
     }
 
-    // 4. Interface monitor
     func usePlatformDefaultInterfaceMonitor() -> Bool {
         return false
     }
@@ -127,16 +130,15 @@ private class TunnelPlatformInterface: NSObject, LibboxPlatformInterfaceProtocol
     func closeDefaultInterfaceMonitor(_ listener: LibboxInterfaceUpdateListenerProtocol?) throws {
     }
 
-    // 5. 修复返回值类型：v1.11.0 将 InterfaceIterator 重命名为了 LibboxNetworkInterfaceIteratorProtocol
     func usePlatformInterfaceGetter() -> Bool {
         return false
     }
 
-    func getInterfaces() throws -> LibboxNetworkInterfaceIteratorProtocol? {
-        return nil
+    // 修复 Error #2-5: @objc 的 throws 协议方法不允许返回 Optional(?)，直接抛出未实现异常即可
+    func getInterfaces() throws -> LibboxNetworkInterfaceIteratorProtocol {
+        throw NSError(domain: "LibboxPlatformInterface", code: 1, userInfo: [NSLocalizedDescriptionKey: "iOS 平台不需要接口迭代器"])
     }
 
-    // 6. Network Extension flags
     func underNetworkExtension() -> Bool {
         return true
     }
@@ -152,7 +154,6 @@ private class TunnelPlatformInterface: NSObject, LibboxPlatformInterfaceProtocol
         return nil
     }
 
-    // 7. 遵循 LibboxPlatformLogWriterProtocol 接口，将内核日志转入 iOS 系统控制台
     func writeLog(_ message: String?) {
         if let msg = message {
             NSLog("[Libbox] %@", msg)
