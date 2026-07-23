@@ -7,8 +7,7 @@ on:
       - main
 
 env:
-  # 固定 sing-box 版本号，避免上游发新版把你的 CI 跑挂
-  SING_BOX_VERSION: v1.11.0
+  SING_BOX_VERSION: v1.10.7  # 改成旧版本
   # 显式锁定 Xcode 版本号（而不是依赖 runner 默认版本）。
   # macos-14 即将被 GitHub 弃用且 Xcode 版本偏老，无法打开
   # Xcode 16+ 生成的新版工程文件格式；这里统一用 macos-15 +
