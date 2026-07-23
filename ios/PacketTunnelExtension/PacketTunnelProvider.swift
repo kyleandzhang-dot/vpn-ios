@@ -129,18 +129,20 @@ private class TunnelPlatformInterface: NSObject, LibboxPlatformInterfaceProtocol
     func closeDefaultInterfaceMonitor(_ listener: LibboxInterfaceUpdateListenerProtocol?) throws {
     }
 
-    // MARK: - 接口获取适配
-    // 适配 sing-box v1.10.x+：方法名已从 usePlatformInterfaceGetter 改为 useGetter
+    // MARK: - 接口迭代器适配 (同时兼容 v1.10 和 v1.11 新旧命名)
     func useGetter() -> Bool {
         return false
     }
 
-    // 同时保留旧版方法名，确保代码向上/向下兼容不同的内核构建版本
     func usePlatformInterfaceGetter() -> Bool {
         return false
     }
 
-    // MARK: - 系统代理适配 (sing-box v1.10+ 新增强制必现方法)
+    func getInterfaces() throws -> LibboxNetworkInterfaceIteratorProtocol {
+        throw NSError(domain: "LibboxPlatformInterface", code: 1, userInfo: [NSLocalizedDescriptionKey: "iOS 平台不需要接口迭代器"])
+    }
+
+    // MARK: - 系统代理适配 (sing-box v1.10+ 新增强制接口)
     func usePlatformSystemProxy() -> Bool {
         return false
     }
@@ -152,12 +154,24 @@ private class TunnelPlatformInterface: NSObject, LibboxPlatformInterfaceProtocol
     func clearSystemProxy() throws {
     }
 
-    // MARK: - 其他原有方法
-    // @objc 的 throws 方法成功时必须返回非空实体，这里直接抛出未实现异常，完美满足桥接协议规范
-    func getInterfaces() throws -> LibboxNetworkInterfaceIteratorProtocol {
-        throw NSError(domain: "LibboxPlatformInterface", code: 1, userInfo: [NSLocalizedDescriptionKey: "iOS 平台不需要接口迭代器"])
+    // MARK: - 系统 DNS 与路由表适配 (sing-box v1.10+ / v1.11+ 新增强制接口)
+    func usePlatformSystemDNS() -> Bool {
+        return false
     }
 
+    func readSystemDNS() throws -> LibboxSystemDNSIteratorProtocol {
+        throw NSError(domain: "LibboxPlatformInterface", code: 1, userInfo: [NSLocalizedDescriptionKey: "iOS 平台不需要系统 DNS 迭代器"])
+    }
+
+    func usePlatformRoutingTable() -> Bool {
+        return false
+    }
+
+    func readRoutingTable() throws -> LibboxRoutingTableIteratorProtocol {
+        throw NSError(domain: "LibboxPlatformInterface", code: 1, userInfo: [NSLocalizedDescriptionKey: "iOS 平台不需要路由表迭代器"])
+    }
+
+    // MARK: - 网络拓展与日志
     func underNetworkExtension() -> Bool {
         return true
     }
