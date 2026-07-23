@@ -20,7 +20,7 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
             let interface = TunnelPlatformInterface(provider: self)
             self.platformInterface = interface
 
-            // 修复 Error #6: LibboxNewService 为全局 C 函数，第三个参数是 Objective-C 的错误指针 &err
+            // LibboxNewService 为 C 语言全局导出函数，第三个参数必须传 &err 错误指针
             var err: NSError?
             guard let service = LibboxNewService(configJson, interface, &err) else {
                 if let err = err {
@@ -81,7 +81,6 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
     }
 }
 
-// 修复 Error #1: WriteLog 是 LibboxPlatformInterfaceProtocol 自带的方法，无需实现不存在的 LogWriter 协议
 private class TunnelPlatformInterface: NSObject, LibboxPlatformInterfaceProtocol {
     private weak var provider: PacketTunnelProvider?
 
@@ -134,7 +133,7 @@ private class TunnelPlatformInterface: NSObject, LibboxPlatformInterfaceProtocol
         return false
     }
 
-    // 修复 Error #2-5: @objc 的 throws 协议方法不允许返回 Optional(?)，直接抛出未实现异常即可
+    // @objc 的 throws 方法成功时必须返回非空实体，这里直接抛出未实现异常，完美满足桥接协议规范
     func getInterfaces() throws -> LibboxNetworkInterfaceIteratorProtocol {
         throw NSError(domain: "LibboxPlatformInterface", code: 1, userInfo: [NSLocalizedDescriptionKey: "iOS 平台不需要接口迭代器"])
     }
