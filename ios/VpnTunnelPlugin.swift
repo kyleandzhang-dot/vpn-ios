@@ -90,8 +90,10 @@ public class VpnTunnelPlugin: NSObject, FlutterPlugin, FlutterStreamHandler {
             
             // 2. 配置协议 (⚠️ 注意：这里的 Bundle Identifier 必须指向你的 NetworkExtension Target)
             let protocolConfiguration = NETunnelProviderProtocol()
-            // TODO: 请确保这里换成你实际的 PacketTunnelProvider Target 的 Bundle ID（例如 com.miaolian.myvpn.extension）
-            protocolConfiguration.providerBundleIdentifier = "com.example.vpn_all.PacketTunnel"
+
+            // ⚠️ 必须一字不差地换成你图里的 Bundle Identifier！
+            protocolConfiguration.providerBundleIdentifier = "com.miaolian.myvpn.PacketTunnelExtension"
+
             protocolConfiguration.serverAddress = "SingBox VPN"
             
             // 3. 把节点 JSON 数据塞进配置里，供后台 Extension 扩展读取
