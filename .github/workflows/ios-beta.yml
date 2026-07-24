@@ -210,7 +210,15 @@ jobs:
       # 而且这个 Run Script 挂在 Runner 主 target 上，不是 PacketTunnelExtension 上）。
       # 所以必须先跑一次完整的 flutter build ios，让 Runner 主 target 把引擎产物准备好，
       # 之后再单独 build 扩展 target 才能找到 Flutter 模块。
+      #
+      # 【新增 continue-on-error】flutter build ios 自己的错误输出经常被压缩/截断
+      # （比如协议不吻合时，有时只打一行汇总，看不到具体哪个方法不对）。
+      # 所以这里就算它失败也不让 job 直接中断，让下面那个原始 xcodebuild debug 步骤
+      # 照样跑起来，打印完整无删减的编译器诊断信息；最后再用一个检查步骤根据
+      # flutter-build 这一步的真实结果决定整个 job 是否应该失败。
       - name: Build Flutter iOS (no codesign)
+        id: flutter-build
+        continue-on-error: true
         run: flutter build ios --release --no-codesign
 
       # 【关键修改】删掉了末尾的 || true。一旦协议不吻合，直接在这里爆红中断！
@@ -220,6 +228,15 @@ jobs:
         run: |
           cd ios
           xcodebuild -workspace Runner.xcworkspace -scheme PacketTunnelExtension -configuration Release build CODE_SIGNING_ALLOWED=NO
+
+      # 上面 xcodebuild 单独 build 扩展如果过了，但 flutter build ios（build 整个 app）
+      # 之前失败了，说明问题出在 Runner 主 target 或其他地方，而不是扩展本身——
+      # 这里统一收口：只要 flutter build ios 失败过，整个 job 就应该标红失败。
+      - name: Fail job if flutter build ios failed
+        if: steps.flutter-build.outcome == 'failure'
+        run: |
+          echo "flutter build ios 失败了，上面 Debug Swift Extension 步骤只是用来打印完整报错信息，不代表整体构建成功"
+          exit 1
 
       - name: Set up Ruby
         uses: ruby/setup-ruby@v1
