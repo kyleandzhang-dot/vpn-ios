@@ -36,6 +36,13 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
             let basePath = containerURL.appendingPathComponent("libbox").path
             try? FileManager.default.createDirectory(atPath: basePath, withIntermediateDirectories: true)
 
+            // 诊断用：把 stderr 重定向到文件——Go 的 panic / fatal error 默认打印到 stderr，
+            // 系统崩溃报告器抓不到这些文字，但这样能把它落盘保存下来，是目前唯一缺的证据。
+            // 排查完问题后可以删掉这几行。
+            let stderrLogPath = (basePath as NSString).appendingPathComponent("go_stderr.log")
+            freopen(stderrLogPath, "a+", stderr)
+            NSLog("[Tunnel] stderr 已重定向到: %@", stderrLogPath)
+
             if !PacketTunnelProvider.didSetup {
                 let setupOptions = LibboxSetupOptions()
                 setupOptions.basePath = basePath
