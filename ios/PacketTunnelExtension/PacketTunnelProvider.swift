@@ -10,7 +10,7 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
     private static var didSetup = false
 
     // 换成你自己的 App Group ID
-    private let appGroup = "group.com.yourcompany.miaolianvpn"
+    private let appGroup = "group.com.miaolian.myvpn"
 
     override func startTunnel(options: [String : NSObject]?, completionHandler: @escaping (Error?) -> Void) {
         guard let conf = (protocolConfiguration as? NETunnelProviderProtocol)?.providerConfiguration,
