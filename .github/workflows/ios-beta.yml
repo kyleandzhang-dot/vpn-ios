@@ -7,7 +7,7 @@ on:
       - main
 
 env:
-  XCODE_VERSION: '16.4'
+  XCODE_VERSION: 'latest-stable'
 
 jobs:
   build:
@@ -91,7 +91,7 @@ jobs:
             <key>CFBundleExecutable</key>
             <string>Libbox</string>
             <key>CFBundleIdentifier</key>
-            <string>org.singbox.libbox</string>
+            <string>Libbox</string>
             <key>CFBundleInfoDictionaryVersion</key>
             <string>6.0</string>
             <key>CFBundleName</key>
