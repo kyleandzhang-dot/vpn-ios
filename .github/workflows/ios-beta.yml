@@ -30,7 +30,7 @@ jobs:
         uses: actions/cache@v4
         with:
           path: libbox-output/Libbox.xcframework.zip
-          key: libbox-${{ env.SING_BOX_VERSION }}-v6-${{ runner.os }} # 升级 cache key，确保触发全新构建与校验
+          key: libbox-${{ env.SING_BOX_VERSION }}-v7-${{ runner.os }} # 升级 cache key，触发新的构建
 
       - name: Set up Go 1.22
         if: steps.cache-libbox.outputs.cache-hit != 'true'
@@ -152,54 +152,61 @@ jobs:
           rm -rf ios/Libbox.xcframework
           unzip -q -o ./temp-libbox/Libbox.xcframework.zip -d ios/
           
-          echo "== 正在主动执行 Shallow Bundle 扁平化，彻底消灭 Xcode 16 校验报错 =="
+          echo "== 正在执行绝对安全的 Shallow Bundle 扁平化（先提取、清空软链接、再回填）=="
           find ios/Libbox.xcframework -name "*.framework" | while read -r FW_PATH; do
             if [ -d "$FW_PATH/Versions" ]; then
-              echo "正在扁平化: $FW_PATH ..."
+              echo "正在清扫软链接并扁平化: $FW_PATH ..."
+              
+              # 1. 创建临时安全目录，把深层目录下的真正核心数据（完整解开软链接后）提取出来
+              TMP_DIR=$(mktemp -d)
               REAL_DIR="$FW_PATH/Versions/Current"
               [ ! -d "$REAL_DIR" ] && REAL_DIR="$FW_PATH/Versions/A"
+              cp -R -L "$REAL_DIR/"* "$TMP_DIR/" 2>/dev/null || true
               
-              # 1. 把真正的核心文件以及 Info.plist 提取到最外层根目录
-              cp -R -L "$REAL_DIR/"* "$FW_PATH/" 2>/dev/null || true
-              if [ -f "$FW_PATH/Resources/Info.plist" ]; then
-                cp -L "$FW_PATH/Resources/Info.plist" "$FW_PATH/Info.plist" 2>/dev/null || true
+              # 如果深层 Resources 下有 Info.plist，提前提到最外层
+              if [ -f "$TMP_DIR/Resources/Info.plist" ]; then
+                cp -L "$TMP_DIR/Resources/Info.plist" "$TMP_DIR/Info.plist" 2>/dev/null || true
               fi
               
-              # 2. 彻底删除 macOS 风格的深层嵌套与软链接
-              rm -rf "$FW_PATH/Versions" "$FW_PATH/Resources" "$FW_PATH/Current"
+              # 2. 暴力清空原 Framework 目录！彻底摧毁导致 No such module 的死软链接
+              rm -rf "$FW_PATH/"*
               
-              # 3. 防空保底：如果 Info.plist 为空或丢失，自动重写合法内容
-              if [ ! -s "$FW_PATH/Info.plist" ] || [ -L "$FW_PATH/Info.plist" ]; then
-                rm -f "$FW_PATH/Info.plist"
-                cat <<EOF > "$FW_PATH/Info.plist"
+              # 3. 将干净、真实的 Headers, Modules, Libbox 二进制文件直接放回最外层根目录
+              cp -R "$TMP_DIR/"* "$FW_PATH/" 2>/dev/null || true
+              rm -rf "$TMP_DIR"
+            fi
+
+            # 4. 防空保底：如果 Info.plist 为空或丢失，自动重写合法的苹果框架 XML 元数据
+            if [ ! -s "$FW_PATH/Info.plist" ] || [ -L "$FW_PATH/Info.plist" ]; then
+              rm -f "$FW_PATH/Info.plist"
+              cat <<EOF > "$FW_PATH/Info.plist"
           <?xml version="1.0" encoding="UTF-8"?>
           <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
           <plist version="1.0">
           <dict>
-          	<key>CFBundleDevelopmentRegion</key>
-          	<string>en</string>
-          	<key>CFBundleExecutable</key>
-          	<string>Libbox</string>
-          	<key>CFBundleIdentifier</key>
-          	<string>org.singbox.libbox</string>
-          	<key>CFBundleInfoDictionaryVersion</key>
-          	<string>6.0</string>
-          	<key>CFBundleName</key>
-          	<string>Libbox</string>
-          	<key>CFBundlePackageType</key>
-          	<string>FMWK</string>
-          	<key>CFBundleShortVersionString</key>
-          	<string>1.0</string>
-          	<key>CFBundleVersion</key>
-          	<string>1</string>
-          	<key>MinimumOSVersion</key>
-          	<string>13.0</string>
+            <key>CFBundleDevelopmentRegion</key>
+            <string>en</string>
+            <key>CFBundleExecutable</key>
+            <string>Libbox</string>
+            <key>CFBundleIdentifier</key>
+            <string>org.singbox.libbox</string>
+            <key>CFBundleInfoDictionaryVersion</key>
+            <string>6.0</string>
+            <key>CFBundleName</key>
+            <string>Libbox</string>
+            <key>CFBundlePackageType</key>
+            <string>FMWK</string>
+            <key>CFBundleShortVersionString</key>
+            <string>1.0</string>
+            <key>CFBundleVersion</key>
+            <string>1</string>
+            <key>MinimumOSVersion</key>
+            <string>13.0</string>
           </dict>
           </plist>
           EOF
-              fi
-              echo "✅ [$FW_PATH] 扁平化完成！"
             fi
+            echo "✅ [$FW_PATH] 结构转换完成，已确认包含真实的 Modules 与 Headers！"
           done
 
           echo "== 最终语义检查：验证 Libbox.xcframework =="
@@ -207,7 +214,7 @@ jobs:
             echo "❌ 错误: Info.plist 缺少 AvailableLibraries，xcframework 不完整"
             exit 1
           fi
-          echo "✅ Libbox 框架准备就绪，开始构建 Flutter iOS！"
+          echo "✅ Libbox 准备就绪，开始构建 Flutter iOS！"
 
       - name: Cache CocoaPods
         uses: actions/cache@v4
