@@ -1,3 +1,4 @@
+// PacketTunnelExtension/PacketTunnelProvider.swift
 import NetworkExtension
 import Libbox
 import Darwin
@@ -13,6 +14,13 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
     private let appGroup = "group.com.miaolian.myvpn"
 
     override func startTunnel(options: [String : NSObject]?, completionHandler: @escaping (Error?) -> Void) {
+        NSLog("[Tunnel] 开始执行 startTunnel")
+        
+        // ⚠️ 核心防崩修复 1：苹果对 VPN 后台内存限制极严(~15M-30M)，
+        // 必须在 Libbox 初始化前强制限制 Golang 内存分配，否则秒被 iOS 系统的 Jetsam (OOM) 强杀！
+        setenv("GOMEMLIMIT", "30MiB", 1)
+        setenv("GOGC", "20", 1)
+
         guard let conf = (protocolConfiguration as? NETunnelProviderProtocol)?.providerConfiguration,
               let nodeJson = conf["node_json"] as? String else {
             completionHandler(NSError(domain: "PacketTunnel", code: 1, userInfo: [NSLocalizedDescriptionKey: "缺少 node_json 配置"]))
@@ -54,11 +62,23 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
 
             try server.start()
             
-            try server.startOrReloadService(configJson, options: nil as LibboxOverrideOptions?)
-            
-            // ⚠️⚠️⚠️ 就是漏了下面这一行！！告诉 iOS 系统：VPN 启动成功了，别杀我！
-            completionHandler(nil)
-            
+            // ⚠️ 核心防崩修复 2：将服务启动放入后台线程！
+            // 避免 startOrReloadService 同步调回 openTun 时与 Main Thread 产生信号量死锁
+            DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+                guard let self = self, let server = self.commandServer else { return }
+                do {
+                    try server.startOrReloadService(configJson, options: nil as LibboxOverrideOptions?)
+                    NSLog("[Tunnel] Libbox 服务启动成功！")
+                    DispatchQueue.main.async {
+                        completionHandler(nil)
+                    }
+                } catch {
+                    NSLog("[Tunnel] startOrReloadService 失败: %@", error.localizedDescription)
+                    DispatchQueue.main.async {
+                        completionHandler(error)
+                    }
+                }
+            }
         } catch {
             NSLog("[Tunnel] 启动失败: %@", error.localizedDescription)
             completionHandler(error)
@@ -97,8 +117,16 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
             if let error = error {
                 NSLog("[Tunnel] 设置网络参数失败: %@", error.localizedDescription)
             } else if let self = self {
-                if let fd = self.packetFlow.value(forKeyPath: "socket.fileDescriptor") as? Int32 {
-                    tunFd = fd
+                // ⚠️ 核心防崩修复 3：安全反射获取 socket fd[cite: 6]，
+                // 避免直接 KVC 在现代 iOS 上触发 NSUnknownKeyException 导致进程瞬间秒崩！
+                if self.packetFlow.responds(to: NSSelectorFromString("socket")) {
+                    if let socket = self.packetFlow.value(forKey: "socket") as? NSObject {
+                        if socket.responds(to: NSSelectorFromString("fileDescriptor")) {
+                            if let fd = socket.value(forKey: "fileDescriptor") as? Int32 {
+                                tunFd = fd
+                            }
+                        }
+                    }
                 }
             }
             semaphore.signal()
