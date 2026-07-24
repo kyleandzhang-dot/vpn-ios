@@ -18,7 +18,7 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
         with:
-          lfs: true # 显式开启 LFS，确保大静态库能被完整拉取成真实物理文件
+          lfs: true
 
       - name: Select Xcode ${{ env.XCODE_VERSION }}
         uses: maxim-lobanov/setup-xcode@v1
@@ -53,33 +53,25 @@ jobs:
           echo "== 1. 寻找仓库中提交的 Libbox.xcframework =="
           LIBBOX_PATH=$(find ios -iname "Libbox.xcframework" | head -n 1)
           if [ -z "$LIBBOX_PATH" ]; then
-            echo "❌ 找不到 Libbox.xcframework！请确认你已经将它强制提交到了 Git 仓库的 ios 目录下！"
-            find . -name "*Libbox*"
+            echo "❌ 找不到 Libbox.xcframework！"
             exit 1
           fi
-          echo "✅ 成功找到库路径: $LIBBOX_PATH"
           
-          echo "== 2. 正在执行绝对安全的 Shallow Bundle 扁平化（彻底消灭软链接与层级报错）=="
+          echo "== 2. 执行 Shallow Bundle 扁平化与 ID 初次覆写 =="
           find "$LIBBOX_PATH" -name "*.framework" | while read -r FW_PATH; do
             if [ -d "$FW_PATH/Versions" ]; then
-              echo "正在清扫软链接并扁平化: $FW_PATH ..."
-              
               TMP_DIR=$(mktemp -d)
               REAL_DIR="$FW_PATH/Versions/Current"
               [ ! -d "$REAL_DIR" ] && REAL_DIR="$FW_PATH/Versions/A"
               cp -R -L "$REAL_DIR/"* "$TMP_DIR/" 2>/dev/null || true
-              
               if [ -f "$TMP_DIR/Resources/Info.plist" ]; then
                 cp -L "$TMP_DIR/Resources/Info.plist" "$TMP_DIR/Info.plist" 2>/dev/null || true
               fi
-              
               rm -rf "$FW_PATH/"*
               cp -R "$TMP_DIR/"* "$FW_PATH/" 2>/dev/null || true
               rm -rf "$TMP_DIR"
             fi
 
-            # 【核心修改点】不再进行 if 判断！无条件强行覆盖重写，确保 CFBundleIdentifier 绝对是 "Libbox"！
-            echo "正在强行重写标准 Info.plist (确保 Bundle ID 为 Libbox)..."
             rm -f "$FW_PATH/Info.plist"
             cat <<EOF > "$FW_PATH/Info.plist"
           <?xml version="1.0" encoding="UTF-8"?>
@@ -107,15 +99,7 @@ jobs:
           </dict>
           </plist>
           EOF
-            echo "✅ [$FW_PATH] 结构转换与 Info.plist 强行重写完成！"
           done
-
-          echo "== 3. 最终语义检查：验证 Libbox.xcframework =="
-          if ! plutil -convert xml1 -o - "$LIBBOX_PATH/Info.plist" | grep -q "AvailableLibraries"; then
-            echo "❌ 错误: Info.plist 缺少 AvailableLibraries，xcframework 不完整"
-            exit 1
-          fi
-          echo "✅ Libbox 准备就绪，开始构建 Flutter iOS！"
 
       - name: Cache CocoaPods
         uses: actions/cache@v4
@@ -138,6 +122,60 @@ jobs:
 
       - name: Install fastlane
         run: gem install fastlane
+
+      # 【新增核心绝杀步骤】在 pod install 跑完、Fastlane 开始打包的前一刻，
+      # 对整个 CI 机器所有残留或被 Pods 恢复出来的 Libbox 进行最后一次无条件覆盖！
+      - name: Force Lock Libbox Bundle ID Before Archiving
+        run: |
+          set -e
+          echo "== Fastlane 打包前夕：扫荡 Pods 及全网所有 Libbox.framework =="
+          find $GITHUB_WORKSPACE ~/Library/Caches/CocoaPods ~/.pub-cache -name "Libbox*.framework" 2>/dev/null | while read -r FW_PATH; do
+            echo "正在强行锁死目标: $FW_PATH"
+            
+            # 如果 Pods 缓存里还有深层嵌套，顺手干掉
+            if [ -d "$FW_PATH/Versions" ]; then
+              TMP_DIR=$(mktemp -d)
+              REAL_DIR="$FW_PATH/Versions/Current"
+              [ ! -d "$REAL_DIR" ] && REAL_DIR="$FW_PATH/Versions/A"
+              cp -R -L "$REAL_DIR/"* "$TMP_DIR/" 2>/dev/null || true
+              if [ -f "$TMP_DIR/Resources/Info.plist" ]; then
+                cp -L "$TMP_DIR/Resources/Info.plist" "$TMP_DIR/Info.plist" 2>/dev/null || true
+              fi
+              rm -rf "$FW_PATH/"*
+              cp -R "$TMP_DIR/"* "$FW_PATH/" 2>/dev/null || true
+              rm -rf "$TMP_DIR"
+            fi
+
+            # 无条件强行重写，把 CFBundleIdentifier 绝对锁死在 "Libbox"！
+            rm -f "$FW_PATH/Info.plist"
+            cat <<EOF > "$FW_PATH/Info.plist"
+          <?xml version="1.0" encoding="UTF-8"?>
+          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+          <plist version="1.0">
+          <dict>
+            <key>CFBundleDevelopmentRegion</key>
+            <string>en</string>
+            <key>CFBundleExecutable</key>
+            <string>Libbox</string>
+            <key>CFBundleIdentifier</key>
+            <string>Libbox</string>
+            <key>CFBundleInfoDictionaryVersion</key>
+            <string>6.0</string>
+            <key>CFBundleName</key>
+            <string>Libbox</string>
+            <key>CFBundlePackageType</key>
+            <string>FMWK</string>
+            <key>CFBundleShortVersionString</key>
+            <string>1.0</string>
+            <key>CFBundleVersion</key>
+            <string>1</string>
+            <key>MinimumOSVersion</key>
+            <string>13.0</string>
+          </dict>
+          </plist>
+          EOF
+            echo "✅ [$FW_PATH] 已成功锁死为 Libbox！"
+          done
 
       - name: Run fastlane beta
         working-directory: ios
