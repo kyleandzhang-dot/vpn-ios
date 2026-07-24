@@ -58,7 +58,8 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
             // 关键修复：使用新版本标准的 LibboxStartOptions，解决了 nil 无法推断类型的问题
             try server.startOrReloadService(configJson, options: nil as LibboxOverrideOptions?)
         } catch {
-            NSLog("[Tunnel] 启动失败: %@", error.localizedDescription)
+            // ⚠️ 打印出完整的原始 JSON 和明确的错误中文原因
+            NSLog("[Tunnel致命错误] 启动失败！原始数据: %@ | 错误描述: %@", nodeJson, error.localizedDescription)
             completionHandler(error)
         }
     }
