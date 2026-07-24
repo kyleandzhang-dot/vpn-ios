@@ -196,13 +196,15 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-pods-
 
-      - name: Cache DerivedData
-        uses: actions/cache@v4
-        with:
-          path: ~/Library/Developer/Xcode/DerivedData
-          key: ${{ runner.os }}-derived-${{ hashFiles('**/*.swift', '**/*.m', '**/*.dart') }}
-          restore-keys: |
-            ${{ runner.os }}-derived-
+      # 【移除】之前这里有个 Cache DerivedData 步骤，删掉了。
+      # 原因：它的 key 只跟 .swift/.m/.dart 文件内容有关，跟 Libbox 版本、Xcode 版本无关，
+      # 而且带了 restore-keys 兜底匹配。我们这一路调试过程中好几次是在
+      # "找不到 Flutter 模块" 的失败状态下结束的，那次的 DerivedData（连带 Xcode
+      # 对 Flutter 模块"找不到"这个结论的负缓存，存在 ModuleCache.noindex 里）
+      # 很可能被缓存了下来——之后即使 ios/Flutter/Flutter.framework 已经真实存在，
+      # Xcode 也可能复用那份旧的负缓存，导致同样的 "no such module 'Flutter'" 反复出现。
+      # DerivedData 跨 CI run 缓存本来就容易有这类问题，对这个项目规模来说，
+      # 省下来的构建时间不划算，直接不缓存最省心。
 
       # 【修正】之前用 --config-only 是错的：它只做 pod install / 生成配置，
       # 并不会触发 Xcode 里 Flutter 的 Run Script 构建阶段（真正把引擎 Flutter.framework
