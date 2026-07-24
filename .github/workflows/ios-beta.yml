@@ -172,22 +172,18 @@ jobs:
 
       - name: Dump exact LibboxPlatformInterfaceProtocol requirements
         run: |
-          echo "==================== 列出 xcframework 里所有的 .h 头文件 ===================="
-          find ios/Libbox.xcframework -iname "*.h" -print
+          H="ios/Libbox.xcframework/ios-arm64/Libbox.framework/Versions/A/Headers/Libbox.objc.h"
+
+          echo "==================== Libbox.objc.h 里所有的 @protocol 声明名字 ===================="
+          grep -n "^@protocol" "$H"
           echo "=========================================================================="
 
-          echo "==================== 在所有头文件里搜索 PlatformInterfaceProtocol（不区分大小写，宽松匹配）===================="
-          find ios/Libbox.xcframework -iname "*.h" -print0 | xargs -0 grep -l -i "PlatformInterfaceProtocol" || echo "没有任何头文件包含 PlatformInterfaceProtocol 字样"
+          echo "==================== 搜索包含 PlatformInterface 字样的所有行（不带 Protocol 后缀）===================="
+          grep -n -i "PlatformInterface" "$H"
           echo "=========================================================================="
 
-          echo "==================== 逐个文件打印匹配到的协议定义上下文 ===================="
-          for f in $(find ios/Libbox.xcframework -iname "*.h"); do
-            if grep -q -i "PlatformInterfaceProtocol" "$f"; then
-              echo "---- 命中文件: $f ----"
-              grep -n -i -B2 -A 40 "@protocol.*PlatformInterfaceProtocol" "$f"
-              echo "---- 命中文件结束 ----"
-            fi
-          done
+          echo "==================== 把整个 Libbox.objc.h 文件内容打印出来（供人工比对）===================="
+          cat -n "$H"
           echo "=========================================================================="
 
       - name: Cache CocoaPods
