@@ -36,13 +36,6 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
             let basePath = containerURL.appendingPathComponent("libbox").path
             try? FileManager.default.createDirectory(atPath: basePath, withIntermediateDirectories: true)
 
-            // 诊断用：把 stderr 重定向到文件——Go 的 panic / fatal error 默认打印到 stderr，
-            // 系统崩溃报告器抓不到这些文字，但这样能把它落盘保存下来，是目前唯一缺的证据。
-            // 排查完问题后可以删掉这几行。
-            let stderrLogPath = (basePath as NSString).appendingPathComponent("go_stderr.log")
-            freopen(stderrLogPath, "a+", stderr)
-            NSLog("[Tunnel] stderr 已重定向到: %@", stderrLogPath)
-
             if !PacketTunnelProvider.didSetup {
                 let setupOptions = LibboxSetupOptions()
                 setupOptions.basePath = basePath
@@ -74,7 +67,12 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
             DispatchQueue.global(qos: .userInitiated).async { [weak self] in
                 guard let self = self, let server = self.commandServer else { return }
                 do {
-                    try server.startOrReloadService(configJson, options: nil as LibboxOverrideOptions?)
+                    // ⚠️ 关键修复：sing-box 的 StartOrReloadService 内部直接访问
+                    // options.AutoRedirect 等字段，没有做 nil 判断。传 nil 会导致
+                    // Go 侧空指针崩溃（panic: invalid memory address or nil pointer dereference）。
+                    // 必须传一个真正的空对象，而不是 nil。
+                    let overrideOptions = LibboxOverrideOptions()
+                    try server.startOrReloadService(configJson, options: overrideOptions)
                     NSLog("[Tunnel] Libbox 服务启动成功！")
                     DispatchQueue.main.async {
                         completionHandler(nil)
