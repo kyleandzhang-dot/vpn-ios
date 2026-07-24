@@ -41,11 +41,11 @@ jobs:
       - name: Install Flutter dependencies
         run: flutter pub get
 
-      - name: Set build number
-        run: |
-          VERSION_NAME=$(grep '^version:' pubspec.yaml | sed 's/version: //' | cut -d '+' -f 1)
-          sed -i.bak "s/^version: .*/version: ${VERSION_NAME}+${{ github.run_number }}/" pubspec.yaml
-          cat pubspec.yaml | grep version
+      # - name: Set build number
+      #   run: |
+      #     VERSION_NAME=$(grep '^version:' pubspec.yaml | sed 's/version: //' | cut -d '+' -f 1)
+      #     sed -i.bak "s/^version: .*/version: ${VERSION_NAME}+${{ github.run_number }}/" pubspec.yaml
+      #     cat pubspec.yaml | grep version
 
       - name: Find, Flatten Shallow Bundle and Verify committed Libbox
         run: |
