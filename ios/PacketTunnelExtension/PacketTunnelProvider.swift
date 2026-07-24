@@ -49,7 +49,7 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
         completionHandler()
     }
 
-    fileprivate func openTun(options: LibboxTunOptions) -> Int32 {
+    fileprivate func openTun(options: LibboxTunOptionsProtocol) -> Int32 {
         var tunFd: Int32 = -1
         let semaphore = DispatchSemaphore(value: 0)
 
@@ -88,14 +88,14 @@ private class TunnelPlatformInterface: NSObject, LibboxPlatformInterfaceProtocol
         super.init()
     }
 
-    func usePlatformAutoDetectControl() -> Bool {
+    func usePlatformAutoDetectInterfaceControl() -> Bool {
         return false
     }
 
-    func autoDetectControl(_ fd: Int32) throws {
+    func autoDetectInterfaceControl(_ fd: Int32) throws {
     }
 
-    func openTun(_ options: LibboxTunOptions?) throws -> Int32 {
+    func openTun(_ options: LibboxTunOptionsProtocol?) throws -> Int32 {
         guard let provider = provider, let options = options else {
             return -1
         }
@@ -165,6 +165,9 @@ private class TunnelPlatformInterface: NSObject, LibboxPlatformInterfaceProtocol
 
     func readWIFIState() -> LibboxWIFIState? {
         return nil
+    }
+
+    func sendNotification(_ notification: LibboxNotification?) throws {
     }
 
     func writeLog(_ message: String?) {
