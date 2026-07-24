@@ -4,8 +4,13 @@ import Darwin
 
 class PacketTunnelProvider: NEPacketTunnelProvider {
 
-    private var service: LibboxBoxService?
+    private var commandServer: LibboxCommandServer?
     private var platformInterface: TunnelPlatformInterface?
+    private var serverHandler: TunnelCommandServerHandler?
+    private static var didSetup = false
+
+    // 换成你自己的 App Group ID
+    private let appGroup = "group.com.yourcompany.miaolianvpn"
 
     override func startTunnel(options: [String : NSObject]?, completionHandler: @escaping (Error?) -> Void) {
         guard let conf = (protocolConfiguration as? NETunnelProviderProtocol)?.providerConfiguration,
@@ -17,21 +22,41 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
         do {
             let configJson = try SingBoxConfigBuilder.build(fromNodeJson: nodeJson)
 
+            guard let containerURL = FileManager.default.containerURL(forSecurityApplicationGroupIdentifier: appGroup) else {
+                throw NSError(domain: "PacketTunnel", code: 10, userInfo: [NSLocalizedDescriptionKey: "无法获取 App Group 目录"])
+            }
+            let basePath = containerURL.appendingPathComponent("libbox").path
+            try? FileManager.default.createDirectory(atPath: basePath, withIntermediateDirectories: true)
+
+            // 全局 setup 只需要做一次(整个 extension 进程生命周期内)
+            if !PacketTunnelProvider.didSetup {
+                let setupOptions = LibboxSetupOptions()
+                setupOptions.basePath = basePath
+                setupOptions.workingPath = basePath
+                setupOptions.tempPath = NSTemporaryDirectory()
+                var setupErr: NSError?
+                if !LibboxSetup(setupOptions, &setupErr) {
+                    throw setupErr ?? NSError(domain: "PacketTunnel", code: 11, userInfo: [NSLocalizedDescriptionKey: "LibboxSetup 失败"])
+                }
+                PacketTunnelProvider.didSetup = true
+            }
+
             let interface = TunnelPlatformInterface(provider: self)
             self.platformInterface = interface
 
+            let handler = TunnelCommandServerHandler()
+            self.serverHandler = handler
+
             var err: NSError?
-            guard let service = LibboxNewService(configJson, interface, &err) else {
-                if let err = err {
-                    throw err
-                }
-                throw NSError(domain: "PacketTunnel", code: 2, userInfo: [NSLocalizedDescriptionKey: "创建 Libbox 内核服务失败"])
+            guard let server = LibboxNewCommandServer(handler, interface, &err) else {
+                throw err ?? NSError(domain: "PacketTunnel", code: 2, userInfo: [NSLocalizedDescriptionKey: "创建 CommandServer 失败"])
             }
+            self.commandServer = server
 
-            try service.start()
-            self.service = service
-
-            completionHandler(nil)
+            try server.start()
+            
+            // 关键修复：使用新版本标准的 LibboxStartOptions，解决了 nil 无法推断类型的问题
+            try server.startOrReloadService(configJson, options: nil as LibboxOverrideOptions?)
         } catch {
             NSLog("[Tunnel] 启动失败: %@", error.localizedDescription)
             completionHandler(error)
@@ -40,12 +65,14 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
 
     override func stopTunnel(with reason: NEProviderStopReason, completionHandler: @escaping () -> Void) {
         do {
-            try service?.close()
+            try commandServer?.closeService()
         } catch {
-            NSLog("[Tunnel] 关闭异常: %@", error.localizedDescription)
+            NSLog("[Tunnel] 停止服务异常: %@", error.localizedDescription)
         }
-        service = nil
+        commandServer?.close()
+        commandServer = nil
         platformInterface = nil
+        serverHandler = nil
         completionHandler()
     }
 
@@ -80,6 +107,38 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
     }
 }
 
+// MARK: - CommandServerHandler
+
+private class TunnelCommandServerHandler: NSObject, LibboxCommandServerHandlerProtocol {
+    func connectSSHAgent(_ ret0_: UnsafeMutablePointer<Int32>?) throws {
+        ret0_?.pointee = -1
+    }
+
+    func getSystemProxyStatus() throws -> LibboxSystemProxyStatus {
+        throw NSError(domain: "Libbox", code: 1, userInfo: [NSLocalizedDescriptionKey: "iOS 平台不支持获取系统代理状态"])
+    }
+
+    func serviceReload() throws {
+    }
+
+    func serviceStop() throws {
+    }
+
+    func setSystemProxyEnabled(_ enabled: Bool) throws {
+    }
+
+    func triggerNativeCrash() throws {
+    }
+
+    func writeDebugMessage(_ message: String?) {
+        if let msg = message {
+            NSLog("[Libbox] %@", msg)
+        }
+    }
+}
+
+// MARK: - PlatformInterface
+
 private class TunnelPlatformInterface: NSObject, LibboxPlatformInterfaceProtocol {
     private weak var provider: PacketTunnelProvider?
 
@@ -88,11 +147,59 @@ private class TunnelPlatformInterface: NSObject, LibboxPlatformInterfaceProtocol
         super.init()
     }
 
-    func usePlatformAutoDetectControl() -> Bool {
-        return false
+    func lookupSFTPServer(_ error: NSErrorPointer) -> String {
+        return ""
+    }
+
+    func readSystemSSHHostKey(_ error: NSErrorPointer) -> String {
+        return ""
     }
 
     func autoDetectControl(_ fd: Int32) throws {
+    }
+
+    func checkPlatformShell() throws {
+    }
+
+    func clearDNSCache() {
+    }
+
+    func closeDefaultInterfaceMonitor(_ listener: LibboxInterfaceUpdateListenerProtocol?) throws {
+    }
+
+    func closeNeighborMonitor(_ listener: LibboxNeighborUpdateListenerProtocol?) throws {
+    }
+
+    func createBridge(_ options: LibboxBridgeOptions?) throws -> LibboxBridgeSessionProtocol {
+        throw NSError(domain: "LibboxPlatformInterface", code: 1, userInfo: [NSLocalizedDescriptionKey: "iOS 不支持创建 Bridge"])
+    }
+
+    func findConnectionOwner(_ ipProtocol: Int32, sourceAddress: String?, sourcePort: Int32, destinationAddress: String?, destinationPort: Int32) throws -> LibboxConnectionOwner {
+        throw NSError(domain: "LibboxPlatformInterface", code: 1, userInfo: [NSLocalizedDescriptionKey: "iOS 不支持 ConnectionOwner 查询"])
+    }
+
+    func getInterfaces() throws -> LibboxNetworkInterfaceIteratorProtocol {
+        throw NSError(domain: "LibboxPlatformInterface", code: 1, userInfo: [NSLocalizedDescriptionKey: "iOS 平台不需要接口迭代器"])
+    }
+
+    func includeAllNetworks() -> Bool {
+        return false
+    }
+
+    func localDNSTransport() -> LibboxLocalDNSTransportProtocol? {
+        return nil
+    }
+
+    func lookupSFTPServer() throws -> String {
+        return ""
+    }
+
+    func lookupUser(_ username: String?) throws -> LibboxPlatformUser {
+        throw NSError(domain: "LibboxPlatformInterface", code: 1, userInfo: [NSLocalizedDescriptionKey: "iOS 不支持 User 查询"])
+    }
+
+    func openShellSession(_ user: LibboxPlatformUser?, command: String?, environ: LibboxStringIteratorProtocol?, term: String?, rows: Int32, cols: Int32) throws -> LibboxShellSessionProtocol {
+        throw NSError(domain: "LibboxPlatformInterface", code: 1, userInfo: [NSLocalizedDescriptionKey: "iOS 不支持 Shell Session"])
     }
 
     func openTun(_ options: LibboxTunOptionsProtocol?, ret0_: UnsafeMutablePointer<Int32>?) throws {
@@ -106,61 +213,47 @@ private class TunnelPlatformInterface: NSObject, LibboxPlatformInterfaceProtocol
         ret0_?.pointee = fd
     }
 
-    func useProcFS() -> Bool {
-        return false
-    }
-
-    func findConnectionOwner(_ ipProtocol: Int32, sourceAddress: String?, sourcePort: Int32, destinationAddress: String?, destinationPort: Int32, ret0_: UnsafeMutablePointer<Int32>?) throws {
-        ret0_?.pointee = 0
-    }
-
-    func packageName(byUid uid: Int32) throws -> String {
+    func readSystemSSHHostKey() throws -> String {
         return ""
-    }
-
-    func uid(byPackageName packageName: String?, ret0_: UnsafeMutablePointer<Int32>?) throws {
-        ret0_?.pointee = 0
-    }
-
-    func usePlatformDefaultInterfaceMonitor() -> Bool {
-        return false
-    }
-
-    func startDefaultInterfaceMonitor(_ listener: LibboxInterfaceUpdateListenerProtocol?) throws {
-    }
-
-    func closeDefaultInterfaceMonitor(_ listener: LibboxInterfaceUpdateListenerProtocol?) throws {
-    }
-
-    func useGetter() -> Bool {
-        return false
-    }
-
-    func getInterfaces() throws -> LibboxNetworkInterfaceIteratorProtocol {
-        throw NSError(domain: "LibboxPlatformInterface", code: 1, userInfo: [NSLocalizedDescriptionKey: "iOS 平台不需要接口迭代器"])
-    }
-
-    func underNetworkExtension() -> Bool {
-        return true
-    }
-
-    func includeAllNetworks() -> Bool {
-        return false
-    }
-
-    func clearDNSCache() {
     }
 
     func readWIFIState() -> LibboxWIFIState? {
         return nil
     }
 
+    func registerMyInterface(_ name: String?) {
+    }
+
     func send(_ notification: LibboxNotification?) throws {
     }
 
-    func writeLog(_ message: String?) {
-        if let msg = message {
-            NSLog("[Libbox] %@", msg)
-        }
+    func startDefaultInterfaceMonitor(_ listener: LibboxInterfaceUpdateListenerProtocol?) throws {
+    }
+
+    func startNeighborMonitor(_ listener: LibboxNeighborUpdateListenerProtocol?) throws {
+    }
+
+    func tailscaleHostname() -> String {
+        return ""
+    }
+
+    func underNetworkExtension() -> Bool {
+        return true
+    }
+
+    func usePlatformAutoDetectControl() -> Bool {
+        return false
+    }
+
+    func usePlatformBridge() -> Bool {
+        return false
+    }
+
+    func usePlatformShell() -> Bool {
+        return false
+    }
+
+    func useProcFS() -> Bool {
+        return false
     }
 }
