@@ -206,39 +206,18 @@ jobs:
       # DerivedData 跨 CI run 缓存本来就容易有这类问题，对这个项目规模来说，
       # 省下来的构建时间不划算，直接不缓存最省心。
 
-      # 【修正】之前用 --config-only 是错的：它只做 pod install / 生成配置，
-      # 并不会触发 Xcode 里 Flutter 的 Run Script 构建阶段（真正把引擎 Flutter.framework
-      # 拷贝进 ios/Flutter/ephemeral 的正是这个脚本，只有在 target 真正被 build 时才会跑，
-      # 而且这个 Run Script 挂在 Runner 主 target 上，不是 PacketTunnelExtension 上）。
-      # 所以必须先跑一次完整的 flutter build ios，让 Runner 主 target 把引擎产物准备好，
-      # 之后再单独 build 扩展 target 才能找到 Flutter 模块。
-      #
-      # 【新增 continue-on-error】flutter build ios 自己的错误输出经常被压缩/截断
-      # （比如协议不吻合时，有时只打一行汇总，看不到具体哪个方法不对）。
-      # 所以这里就算它失败也不让 job 直接中断，让下面那个原始 xcodebuild debug 步骤
-      # 照样跑起来，打印完整无删减的编译器诊断信息；最后再用一个检查步骤根据
-      # flutter-build 这一步的真实结果决定整个 job 是否应该失败。
+      # 【简化】之前这里还有一个 "Debug Swift Extension with raw xcodebuild" 调试步骤，
+      # 单独用 xcodebuild 只 build PacketTunnelExtension 这个 scheme，想借此拿到更完整的报错。
+      # 但排查到最后发现：这个项目是 CocoaPods + SPM 混合集成（FlutterFramework 走 SPM，
+      # device_info_plus / flutter_secure_storage / package_info_plus 还是走传统 CocoaPods），
+      # 只有 flutter build ios 自己知道怎么把两条集成路径的 Flutter 头文件/模块参数拼对；
+      # 裸跑 xcodebuild 单独构建这个 scheme 会在这几个 CocoaPods 插件上报
+      # "no such module 'Flutter'"，这是这条命令本身路径不对，跟 PacketTunnelExtension
+      # 代码是否有问题无关，纯属噪音。flutter build ios 已经证明能准确报出真实的 Swift
+      # 编译错误（前面几轮协议方法名的问题都是靠它揪出来的），所以直接用它作为唯一构建
+      # 方式即可，不再需要这个调试步骤和配套的 continue-on-error / 收口检查。
       - name: Build Flutter iOS (no codesign)
-        id: flutter-build
-        continue-on-error: true
         run: flutter build ios --release --no-codesign
-
-      # 【关键修改】删掉了末尾的 || true。一旦协议不吻合，直接在这里爆红中断！
-      # 放在 flutter build ios 之后执行：Flutter 引擎已就位，这一步基本是增量重建，
-      # 主要用来把扩展 target 编译时未截断、未压制的完整错误信息打印出来。
-      - name: Debug Swift Extension with raw xcodebuild
-        run: |
-          cd ios
-          xcodebuild -workspace Runner.xcworkspace -scheme PacketTunnelExtension -configuration Release build CODE_SIGNING_ALLOWED=NO
-
-      # 上面 xcodebuild 单独 build 扩展如果过了，但 flutter build ios（build 整个 app）
-      # 之前失败了，说明问题出在 Runner 主 target 或其他地方，而不是扩展本身——
-      # 这里统一收口：只要 flutter build ios 失败过，整个 job 就应该标红失败。
-      - name: Fail job if flutter build ios failed
-        if: steps.flutter-build.outcome == 'failure'
-        run: |
-          echo "flutter build ios 失败了，上面 Debug Swift Extension 步骤只是用来打印完整报错信息，不代表整体构建成功"
-          exit 1
 
       - name: Set up Ruby
         uses: ruby/setup-ruby@v1
