@@ -151,6 +151,7 @@ jobs:
           name: libbox-archive
           path: ./temp-libbox
 
+          
       - name: Extract and verify libbox framework
         run: |
           set -e
@@ -193,6 +194,12 @@ jobs:
           key: ${{ runner.os }}-derived-${{ hashFiles('**/*.swift', '**/*.m', '**/*.dart') }}
           restore-keys: |
             ${{ runner.os }}-derived-
+
+      # 【新增】先跑 --config-only，把 ios/Flutter/Flutter.framework 等 Flutter engine 产物准备好，
+      # 否则下面 xcodebuild 编译 shared_preferences_foundation / flutter_secure_storage 等 Pod 时
+      # 会因为找不到 Flutter.framework 而报 "no such module 'Flutter'"
+      - name: Precache Flutter iOS framework
+        run: flutter build ios --release --no-codesign --config-only
 
       # 【关键修改】删掉了末尾的 || true。一旦协议不吻合，直接在这里爆红中断！
       - name: Debug Swift Extension with raw xcodebuild
