@@ -7,102 +7,10 @@ on:
       - main
 
 env:
-  SING_BOX_VERSION: v1.10.7
   XCODE_VERSION: '16.4'
 
 jobs:
-  build-libbox:
-    runs-on: macos-15
-    timeout-minutes: 30
-    outputs:
-      cache-hit: ${{ steps.cache-libbox.outputs.cache-hit }}
-    env:
-      CGO_ENABLED: 1
-      GOFLAGS: -ldflags=-linkmode=external
-    steps:
-      - name: Select Xcode ${{ env.XCODE_VERSION }}
-        uses: maxim-lobanov/setup-xcode@v1
-        with:
-          xcode-version: ${{ env.XCODE_VERSION }}
-
-      - name: Cache libbox archive
-        id: cache-libbox
-        uses: actions/cache@v4
-        with:
-          path: libbox-output/Libbox.xcframework.zip
-          key: libbox-${{ env.SING_BOX_VERSION }}-v7-${{ runner.os }} # 升级 cache key，触发新的构建
-
-      - name: Set up Go 1.22
-        if: steps.cache-libbox.outputs.cache-hit != 'true'
-        uses: actions/setup-go@v5
-        with:
-          go-version: '1.22'
-
-      - name: Install sagernet/gomobile toolchain
-        if: steps.cache-libbox.outputs.cache-hit != 'true'
-        env:
-          CGO_ENABLED: 1
-        run: |
-          go install -ldflags="-linkmode=external" -v github.com/sagernet/gomobile/cmd/gomobile@v0.1.4
-          go install -ldflags="-linkmode=external" -v github.com/sagernet/gomobile/cmd/gobind@v0.1.4
-          codesign -s - "$(go env GOPATH)/bin/gomobile"
-          codesign -s - "$(go env GOPATH)/bin/gobind"
-          echo "$(go env GOPATH)/bin" >> "$GITHUB_PATH"
-
-      - name: gomobile init
-        if: steps.cache-libbox.outputs.cache-hit != 'true'
-        run: gomobile init
-
-      - name: Clone sing-box
-        if: steps.cache-libbox.outputs.cache-hit != 'true'
-        run: |
-          git clone --branch ${{ env.SING_BOX_VERSION }} --depth 1 https://github.com/SagerNet/sing-box.git
-
-      - name: Build Libbox.xcframework
-        if: steps.cache-libbox.outputs.cache-hit != 'true'
-        working-directory: sing-box
-        run: |
-          set -e
-          make lib_ios
-          FRAMEWORK_PATH=$(find . -iname "Libbox.xcframework" -maxdepth 3 | head -n 1)
-          if [ -z "$FRAMEWORK_PATH" ]; then
-            echo "❌ 找不到 Libbox.xcframework，请检查 build 日志"
-            find . -iname "*.xcframework"
-            exit 1
-          fi
-          echo "FRAMEWORK_PATH=$FRAMEWORK_PATH" >> "$GITHUB_ENV"
-
-      - name: Verify xcframework structure before zipping
-        if: steps.cache-libbox.outputs.cache-hit != 'true'
-        working-directory: sing-box
-        run: |
-          echo "== 正在验证 Info.plist =="
-          if ! plutil -convert xml1 -o - "$FRAMEWORK_PATH/Info.plist" | grep -q "AvailableLibraries"; then
-            echo "❌ 错误: 未找到 AvailableLibraries，该 xcframework 结构不合法"
-            exit 1
-          fi
-          echo "✅ 基础验证通过"
-
-      - name: Archive Libbox.xcframework
-        if: steps.cache-libbox.outputs.cache-hit != 'true'
-        working-directory: sing-box
-        run: |
-          set -e
-          mkdir -p $GITHUB_WORKSPACE/libbox-output
-          cd $(dirname "$FRAMEWORK_PATH")
-          zip -r -y $GITHUB_WORKSPACE/libbox-output/Libbox.xcframework.zip $(basename "$FRAMEWORK_PATH")
-          cd $GITHUB_WORKSPACE
-          unzip -t libbox-output/Libbox.xcframework.zip > /dev/null
-
-      - name: Upload libbox artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: libbox-archive
-          path: libbox-output/Libbox.xcframework.zip
-          retention-days: 7
-
   build:
-    needs: build-libbox
     runs-on: macos-15
     timeout-minutes: 30
 
@@ -110,7 +18,7 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
         with:
-          lfs: true # 显式开启 LFS，防坑必备
+          lfs: true # 显式开启 LFS，确保大静态库能被完整拉取成真实物理文件
 
       - name: Select Xcode ${{ env.XCODE_VERSION }}
         uses: maxim-lobanov/setup-xcode@v1
@@ -139,44 +47,38 @@ jobs:
           sed -i.bak "s/^version: .*/version: ${VERSION_NAME}+${{ github.run_number }}/" pubspec.yaml
           cat pubspec.yaml | grep version
 
-      - name: Download libbox artifact
-        uses: actions/download-artifact@v4
-        with:
-          name: libbox-archive
-          path: ./temp-libbox
-
-      - name: Extract, Flatten Shallow Bundle and Verify libbox
+      - name: Find, Flatten Shallow Bundle and Verify committed Libbox
         run: |
           set -e
-          mkdir -p ios
-          rm -rf ios/Libbox.xcframework
-          unzip -q -o ./temp-libbox/Libbox.xcframework.zip -d ios/
+          echo "== 1. 寻找仓库中提交的 Libbox.xcframework =="
+          LIBBOX_PATH=$(find ios -iname "Libbox.xcframework" | head -n 1)
+          if [ -z "$LIBBOX_PATH" ]; then
+            echo "❌ 找不到 Libbox.xcframework！请确认你已经将它强制提交到了 Git 仓库的 ios 目录下！"
+            find . -name "*Libbox*"
+            exit 1
+          fi
+          echo "✅ 成功找到库路径: $LIBBOX_PATH"
           
-          echo "== 正在执行绝对安全的 Shallow Bundle 扁平化（先提取、清空软链接、再回填）=="
-          find ios/Libbox.xcframework -name "*.framework" | while read -r FW_PATH; do
+          echo "== 2. 正在执行绝对安全的 Shallow Bundle 扁平化（彻底消灭软链接与层级报错）=="
+          find "$LIBBOX_PATH" -name "*.framework" | while read -r FW_PATH; do
             if [ -d "$FW_PATH/Versions" ]; then
               echo "正在清扫软链接并扁平化: $FW_PATH ..."
               
-              # 1. 创建临时安全目录，把深层目录下的真正核心数据（完整解开软链接后）提取出来
               TMP_DIR=$(mktemp -d)
               REAL_DIR="$FW_PATH/Versions/Current"
               [ ! -d "$REAL_DIR" ] && REAL_DIR="$FW_PATH/Versions/A"
               cp -R -L "$REAL_DIR/"* "$TMP_DIR/" 2>/dev/null || true
               
-              # 如果深层 Resources 下有 Info.plist，提前提到最外层
               if [ -f "$TMP_DIR/Resources/Info.plist" ]; then
                 cp -L "$TMP_DIR/Resources/Info.plist" "$TMP_DIR/Info.plist" 2>/dev/null || true
               fi
               
-              # 2. 暴力清空原 Framework 目录！彻底摧毁导致 No such module 的死软链接
               rm -rf "$FW_PATH/"*
-              
-              # 3. 将干净、真实的 Headers, Modules, Libbox 二进制文件直接放回最外层根目录
               cp -R "$TMP_DIR/"* "$FW_PATH/" 2>/dev/null || true
               rm -rf "$TMP_DIR"
             fi
 
-            # 4. 防空保底：如果 Info.plist 为空或丢失，自动重写合法的苹果框架 XML 元数据
+            # 防空保底：如果 Info.plist 为空或丢失，自动重写合法的苹果框架 XML 元数据
             if [ ! -s "$FW_PATH/Info.plist" ] || [ -L "$FW_PATH/Info.plist" ]; then
               rm -f "$FW_PATH/Info.plist"
               cat <<EOF > "$FW_PATH/Info.plist"
@@ -206,11 +108,11 @@ jobs:
           </plist>
           EOF
             fi
-            echo "✅ [$FW_PATH] 结构转换完成，已确认包含真实的 Modules 与 Headers！"
+            echo "✅ [$FW_PATH] 结构转换完成！"
           done
 
-          echo "== 最终语义检查：验证 Libbox.xcframework =="
-          if ! plutil -convert xml1 -o - ios/Libbox.xcframework/Info.plist | grep -q "AvailableLibraries"; then
+          echo "== 3. 最终语义检查：验证 Libbox.xcframework =="
+          if ! plutil -convert xml1 -o - "$LIBBOX_PATH/Info.plist" | grep -q "AvailableLibraries"; then
             echo "❌ 错误: Info.plist 缺少 AvailableLibraries，xcframework 不完整"
             exit 1
           fi
