@@ -72,6 +72,7 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
                     // Go 侧空指针崩溃（panic: invalid memory address or nil pointer dereference）。
                     // 必须传一个真正的空对象，而不是 nil。
                     let overrideOptions = LibboxOverrideOptions()
+                    NSLog("[Tunnel] === 使用修复版代码 MARKER-V2，options 非空: %@ ===", overrideOptions)
                     try server.startOrReloadService(configJson, options: overrideOptions)
                     NSLog("[Tunnel] Libbox 服务启动成功！")
                     DispatchQueue.main.async {
