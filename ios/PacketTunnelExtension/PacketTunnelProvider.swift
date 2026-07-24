@@ -28,7 +28,6 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
             let basePath = containerURL.appendingPathComponent("libbox").path
             try? FileManager.default.createDirectory(atPath: basePath, withIntermediateDirectories: true)
 
-            // 全局 setup 只需要做一次(整个 extension 进程生命周期内)
             if !PacketTunnelProvider.didSetup {
                 let setupOptions = LibboxSetupOptions()
                 setupOptions.basePath = basePath
@@ -55,11 +54,13 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
 
             try server.start()
             
-            // 关键修复：使用新版本标准的 LibboxStartOptions，解决了 nil 无法推断类型的问题
             try server.startOrReloadService(configJson, options: nil as LibboxOverrideOptions?)
+            
+            // ⚠️⚠️⚠️ 就是漏了下面这一行！！告诉 iOS 系统：VPN 启动成功了，别杀我！
+            completionHandler(nil)
+            
         } catch {
-            // ⚠️ 打印出完整的原始 JSON 和明确的错误中文原因
-            NSLog("[Tunnel致命错误] 启动失败！原始数据: %@ | 错误描述: %@", nodeJson, error.localizedDescription)
+            NSLog("[Tunnel] 启动失败: %@", error.localizedDescription)
             completionHandler(error)
         }
     }
