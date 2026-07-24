@@ -1,6 +1,6 @@
 name: my_vpn_app
 description: 喵脸 VPN 
-version: 1.0.0+106
+version: 1.0.0+107
 
 environment:
   sdk: '>=3.0.0 <4.0.0'
