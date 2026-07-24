@@ -78,10 +78,10 @@ jobs:
               rm -rf "$TMP_DIR"
             fi
 
-            # 防空保底：如果 Info.plist 为空或丢失，自动重写合法的苹果框架 XML 元数据
-            if [ ! -s "$FW_PATH/Info.plist" ] || [ -L "$FW_PATH/Info.plist" ]; then
-              rm -f "$FW_PATH/Info.plist"
-              cat <<EOF > "$FW_PATH/Info.plist"
+            # 【核心修改点】不再进行 if 判断！无条件强行覆盖重写，确保 CFBundleIdentifier 绝对是 "Libbox"！
+            echo "正在强行重写标准 Info.plist (确保 Bundle ID 为 Libbox)..."
+            rm -f "$FW_PATH/Info.plist"
+            cat <<EOF > "$FW_PATH/Info.plist"
           <?xml version="1.0" encoding="UTF-8"?>
           <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
           <plist version="1.0">
@@ -107,8 +107,7 @@ jobs:
           </dict>
           </plist>
           EOF
-            fi
-            echo "✅ [$FW_PATH] 结构转换完成！"
+            echo "✅ [$FW_PATH] 结构转换与 Info.plist 强行重写完成！"
           done
 
           echo "== 3. 最终语义检查：验证 Libbox.xcframework =="
