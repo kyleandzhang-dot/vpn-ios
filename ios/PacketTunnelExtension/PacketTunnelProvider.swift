@@ -88,34 +88,38 @@ private class TunnelPlatformInterface: NSObject, LibboxPlatformInterfaceProtocol
         super.init()
     }
 
-    func usePlatformAutoDetectControl() -> Bool {
+    func usePlatformAutoDetectInterfaceControl() -> Bool {
         return false
     }
 
-    func autoDetectControl(_ fd: Int32) throws {
+    func autoDetectInterfaceControl(_ fd: Int32) throws {
     }
 
-    func openTun(_ options: LibboxTunOptionsProtocol?) throws -> Int32 {
+    func openTun(_ options: LibboxTunOptionsProtocol?, ret0_: UnsafeMutablePointer<Int32>?) throws {
         guard let provider = provider, let options = options else {
-            return -1
+            throw NSError(domain: "LibboxPlatformInterface", code: 1, userInfo: [NSLocalizedDescriptionKey: "openTun 参数无效"])
         }
-        return provider.openTun(options: options)
+        let fd = provider.openTun(options: options)
+        guard fd >= 0 else {
+            throw NSError(domain: "LibboxPlatformInterface", code: 2, userInfo: [NSLocalizedDescriptionKey: "打开 TUN 失败"])
+        }
+        ret0_?.pointee = fd
     }
 
     func useProcFS() -> Bool {
         return false
     }
 
-    func findConnectionOwner(_ ipProtocol: Int32, sourceAddress: String?, sourcePort: Int32, destinationAddress: String?, destinationPort: Int32) throws -> Int32 {
-        return 0
+    func findConnectionOwner(_ ipProtocol: Int32, sourceAddress: String?, sourcePort: Int32, destinationAddress: String?, destinationPort: Int32, ret0_: UnsafeMutablePointer<Int32>?) throws {
+        ret0_?.pointee = 0
     }
 
     func packageName(byUid uid: Int32) throws -> String {
         return ""
     }
 
-    func uid(byPackageName packageName: String?, ret0_: UnsafeMutablePointer<Int32>?) throws -> Bool {
-        return false
+    func uid(byPackageName packageName: String?, ret0_: UnsafeMutablePointer<Int32>?) throws {
+        ret0_?.pointee = 0
     }
 
     func usePlatformDefaultInterfaceMonitor() -> Bool {
@@ -128,28 +132,12 @@ private class TunnelPlatformInterface: NSObject, LibboxPlatformInterfaceProtocol
     func closeDefaultInterfaceMonitor(_ listener: LibboxInterfaceUpdateListenerProtocol?) throws {
     }
 
-    // 适配 v1.10.7：新旧接口名同时保留
-    func useGetter() -> Bool {
-        return false
-    }
-
     func usePlatformInterfaceGetter() -> Bool {
         return false
     }
 
     func getInterfaces() throws -> LibboxNetworkInterfaceIteratorProtocol {
         throw NSError(domain: "LibboxPlatformInterface", code: 1, userInfo: [NSLocalizedDescriptionKey: "iOS 平台不需要接口迭代器"])
-    }
-
-    // 系统代理适配
-    func usePlatformSystemProxy() -> Bool {
-        return false
-    }
-
-    func setSystemProxy(_ enabled: Bool, server: String?, port: Int32) throws {
-    }
-
-    func clearSystemProxy() throws {
     }
 
     func underNetworkExtension() -> Bool {
@@ -167,7 +155,7 @@ private class TunnelPlatformInterface: NSObject, LibboxPlatformInterfaceProtocol
         return nil
     }
 
-    func send(_ notification: LibboxNotification?) throws {
+    func sendNotification(_ notification: LibboxNotification?) throws {
     }
 
     func writeLog(_ message: String?) {
