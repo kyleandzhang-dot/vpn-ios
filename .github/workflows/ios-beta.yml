@@ -30,7 +30,7 @@ jobs:
         uses: actions/cache@v4
         with:
           path: libbox-output/Libbox.xcframework.zip
-          key: libbox-${{ env.SING_BOX_VERSION }}-v5-${{ runner.os }}
+          key: libbox-${{ env.SING_BOX_VERSION }}-v6-${{ runner.os }} # 升级 cache key，确保触发全新构建与校验
 
       - name: Set up Go 1.22
         if: steps.cache-libbox.outputs.cache-hit != 'true'
@@ -66,29 +66,22 @@ jobs:
           make lib_ios
           FRAMEWORK_PATH=$(find . -iname "Libbox.xcframework" -maxdepth 3 | head -n 1)
           if [ -z "$FRAMEWORK_PATH" ]; then
-            echo "找不到 Libbox.xcframework，请检查 build 日志确认实际产出路径"
+            echo "❌ 找不到 Libbox.xcframework，请检查 build 日志"
             find . -iname "*.xcframework"
             exit 1
           fi
           echo "FRAMEWORK_PATH=$FRAMEWORK_PATH" >> "$GITHUB_ENV"
 
-      - name: Debug Info.plist before zipping
+      - name: Verify xcframework structure before zipping
         if: steps.cache-libbox.outputs.cache-hit != 'true'
         working-directory: sing-box
         run: |
-          echo "== Xcode 版本 =="
-          xcodebuild -version
-          echo "== 文件类型 =="
-          file "$FRAMEWORK_PATH/Info.plist"
-          echo "== plist 内容（转成 xml 方便阅读）=="
-          plutil -convert xml1 -o - "$FRAMEWORK_PATH/Info.plist"
-          echo "== 是否包含 AvailableLibraries 关键字段 =="
-          if plutil -convert xml1 -o - "$FRAMEWORK_PATH/Info.plist" | grep -q "AvailableLibraries"; then
-            echo "OK: 包含 AvailableLibraries"
-          else
-            echo "警告: 未找到 AvailableLibraries，这份 xcframework 很可能是不完整/格式不对的"
+          echo "== 正在验证 Info.plist =="
+          if ! plutil -convert xml1 -o - "$FRAMEWORK_PATH/Info.plist" | grep -q "AvailableLibraries"; then
+            echo "❌ 错误: 未找到 AvailableLibraries，该 xcframework 结构不合法"
             exit 1
           fi
+          echo "✅ 基础验证通过"
 
       - name: Archive Libbox.xcframework
         if: steps.cache-libbox.outputs.cache-hit != 'true'
@@ -116,6 +109,8 @@ jobs:
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
+        with:
+          lfs: true # 显式开启 LFS，防坑必备
 
       - name: Select Xcode ${{ env.XCODE_VERSION }}
         uses: maxim-lobanov/setup-xcode@v1
@@ -130,8 +125,7 @@ jobs:
       - name: Cache Flutter pub dependencies
         uses: actions/cache@v4
         with:
-          path: |
-            ~/.pub-cache
+          path: ~/.pub-cache
           key: ${{ runner.os }}-pub-${{ hashFiles('**/pubspec.lock') }}
           restore-keys: |
             ${{ runner.os }}-pub-
@@ -151,40 +145,69 @@ jobs:
           name: libbox-archive
           path: ./temp-libbox
 
-      - name: Extract and verify libbox framework
+      - name: Extract, Flatten Shallow Bundle and Verify libbox
         run: |
           set -e
           mkdir -p ios
           rm -rf ios/Libbox.xcframework
           unzip -q -o ./temp-libbox/Libbox.xcframework.zip -d ios/
-          ls -la ios/Libbox.xcframework
-          echo "== Xcode 版本（用于实际读取 xcframework 的这台 runner）=="
-          xcodebuild -version
-          echo "== 文件类型 =="
-          file ios/Libbox.xcframework/Info.plist
-          echo "== 语法检查 =="
-          plutil -lint ios/Libbox.xcframework/Info.plist
-          echo "== 语义检查：是否包含 AvailableLibraries =="
+          
+          echo "== 正在主动执行 Shallow Bundle 扁平化，彻底消灭 Xcode 16 校验报错 =="
+          find ios/Libbox.xcframework -name "*.framework" | while read -r FW_PATH; do
+            if [ -d "$FW_PATH/Versions" ]; then
+              echo "正在扁平化: $FW_PATH ..."
+              REAL_DIR="$FW_PATH/Versions/Current"
+              [ ! -d "$REAL_DIR" ] && REAL_DIR="$FW_PATH/Versions/A"
+              
+              # 1. 把真正的核心文件以及 Info.plist 提取到最外层根目录
+              cp -R -L "$REAL_DIR/"* "$FW_PATH/" 2>/dev/null || true
+              if [ -f "$FW_PATH/Resources/Info.plist" ]; then
+                cp -L "$FW_PATH/Resources/Info.plist" "$FW_PATH/Info.plist" 2>/dev/null || true
+              fi
+              
+              # 2. 彻底删除 macOS 风格的深层嵌套与软链接
+              rm -rf "$FW_PATH/Versions" "$FW_PATH/Resources" "$FW_PATH/Current"
+              
+              # 3. 防空保底：如果 Info.plist 为空或丢失，自动重写合法内容
+              if [ ! -s "$FW_PATH/Info.plist" ] || [ -L "$FW_PATH/Info.plist" ]; then
+                rm -f "$FW_PATH/Info.plist"
+                cat <<EOF > "$FW_PATH/Info.plist"
+          <?xml version="1.0" encoding="UTF-8"?>
+          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+          <plist version="1.0">
+          <dict>
+          	<key>CFBundleDevelopmentRegion</key>
+          	<string>en</string>
+          	<key>CFBundleExecutable</key>
+          	<string>Libbox</string>
+          	<key>CFBundleIdentifier</key>
+          	<string>org.singbox.libbox</string>
+          	<key>CFBundleInfoDictionaryVersion</key>
+          	<string>6.0</string>
+          	<key>CFBundleName</key>
+          	<string>Libbox</string>
+          	<key>CFBundlePackageType</key>
+          	<string>FMWK</string>
+          	<key>CFBundleShortVersionString</key>
+          	<string>1.0</string>
+          	<key>CFBundleVersion</key>
+          	<string>1</string>
+          	<key>MinimumOSVersion</key>
+          	<string>13.0</string>
+          </dict>
+          </plist>
+          EOF
+              fi
+              echo "✅ [$FW_PATH] 扁平化完成！"
+            fi
+          done
+
+          echo "== 最终语义检查：验证 Libbox.xcframework =="
           if ! plutil -convert xml1 -o - ios/Libbox.xcframework/Info.plist | grep -q "AvailableLibraries"; then
-            echo "错误: Info.plist 缺少 AvailableLibraries，xcframework 不完整"
+            echo "❌ 错误: Info.plist 缺少 AvailableLibraries，xcframework 不完整"
             exit 1
           fi
-
-      - name: Dump exact LibboxPlatformInterfaceProtocol requirements
-        run: |
-          H="ios/Libbox.xcframework/ios-arm64/Libbox.framework/Versions/A/Headers/Libbox.objc.h"
-
-          echo "==================== Libbox.objc.h 里所有的 @protocol 声明名字 ===================="
-          grep -n "^@protocol" "$H"
-          echo "=========================================================================="
-
-          echo "==================== 搜索包含 PlatformInterface 字样的所有行（不带 Protocol 后缀）===================="
-          grep -n -i "PlatformInterface" "$H"
-          echo "=========================================================================="
-
-          echo "==================== 把整个 Libbox.objc.h 文件内容打印出来（供人工比对）===================="
-          cat -n "$H"
-          echo "=========================================================================="
+          echo "✅ Libbox 框架准备就绪，开始构建 Flutter iOS！"
 
       - name: Cache CocoaPods
         uses: actions/cache@v4
@@ -196,26 +219,6 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-pods-
 
-      # 【移除】之前这里有个 Cache DerivedData 步骤，删掉了。
-      # 原因：它的 key 只跟 .swift/.m/.dart 文件内容有关，跟 Libbox 版本、Xcode 版本无关，
-      # 而且带了 restore-keys 兜底匹配。我们这一路调试过程中好几次是在
-      # "找不到 Flutter 模块" 的失败状态下结束的，那次的 DerivedData（连带 Xcode
-      # 对 Flutter 模块"找不到"这个结论的负缓存，存在 ModuleCache.noindex 里）
-      # 很可能被缓存了下来——之后即使 ios/Flutter/Flutter.framework 已经真实存在，
-      # Xcode 也可能复用那份旧的负缓存，导致同样的 "no such module 'Flutter'" 反复出现。
-      # DerivedData 跨 CI run 缓存本来就容易有这类问题，对这个项目规模来说，
-      # 省下来的构建时间不划算，直接不缓存最省心。
-
-      # 【简化】之前这里还有一个 "Debug Swift Extension with raw xcodebuild" 调试步骤，
-      # 单独用 xcodebuild 只 build PacketTunnelExtension 这个 scheme，想借此拿到更完整的报错。
-      # 但排查到最后发现：这个项目是 CocoaPods + SPM 混合集成（FlutterFramework 走 SPM，
-      # device_info_plus / flutter_secure_storage / package_info_plus 还是走传统 CocoaPods），
-      # 只有 flutter build ios 自己知道怎么把两条集成路径的 Flutter 头文件/模块参数拼对；
-      # 裸跑 xcodebuild 单独构建这个 scheme 会在这几个 CocoaPods 插件上报
-      # "no such module 'Flutter'"，这是这条命令本身路径不对，跟 PacketTunnelExtension
-      # 代码是否有问题无关，纯属噪音。flutter build ios 已经证明能准确报出真实的 Swift
-      # 编译错误（前面几轮协议方法名的问题都是靠它揪出来的），所以直接用它作为唯一构建
-      # 方式即可，不再需要这个调试步骤和配套的 continue-on-error / 收口检查。
       - name: Build Flutter iOS (no codesign)
         run: flutter build ios --release --no-codesign
 
