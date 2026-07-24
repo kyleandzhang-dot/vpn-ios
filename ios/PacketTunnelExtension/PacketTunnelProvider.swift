@@ -88,11 +88,11 @@ private class TunnelPlatformInterface: NSObject, LibboxPlatformInterfaceProtocol
         super.init()
     }
 
-    func usePlatformAutoDetectInterfaceControl() -> Bool {
+    func usePlatformAutoDetectControl() -> Bool {
         return false
     }
 
-    func autoDetectInterfaceControl(_ fd: Int32) throws {
+    func autoDetectControl(_ fd: Int32) throws {
     }
 
     func openTun(_ options: LibboxTunOptionsProtocol?) throws -> Int32 {
@@ -167,7 +167,7 @@ private class TunnelPlatformInterface: NSObject, LibboxPlatformInterfaceProtocol
         return nil
     }
 
-    func sendNotification(_ notification: LibboxNotification?) throws {
+    func send(_ notification: LibboxNotification?) throws {
     }
 
     func writeLog(_ message: String?) {
