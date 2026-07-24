@@ -151,7 +151,6 @@ jobs:
           name: libbox-archive
           path: ./temp-libbox
 
-          
       - name: Extract and verify libbox framework
         run: |
           set -e
@@ -195,20 +194,22 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-derived-
 
-      # 【新增】先跑 --config-only，把 ios/Flutter/Flutter.framework 等 Flutter engine 产物准备好，
-      # 否则下面 xcodebuild 编译 shared_preferences_foundation / flutter_secure_storage 等 Pod 时
-      # 会因为找不到 Flutter.framework 而报 "no such module 'Flutter'"
-      - name: Precache Flutter iOS framework
-        run: flutter build ios --release --no-codesign --config-only
+      # 【修正】之前用 --config-only 是错的：它只做 pod install / 生成配置，
+      # 并不会触发 Xcode 里 Flutter 的 Run Script 构建阶段（真正把引擎 Flutter.framework
+      # 拷贝进 ios/Flutter/ephemeral 的正是这个脚本，只有在 target 真正被 build 时才会跑，
+      # 而且这个 Run Script 挂在 Runner 主 target 上，不是 PacketTunnelExtension 上）。
+      # 所以必须先跑一次完整的 flutter build ios，让 Runner 主 target 把引擎产物准备好，
+      # 之后再单独 build 扩展 target 才能找到 Flutter 模块。
+      - name: Build Flutter iOS (no codesign)
+        run: flutter build ios --release --no-codesign
 
       # 【关键修改】删掉了末尾的 || true。一旦协议不吻合，直接在这里爆红中断！
+      # 放在 flutter build ios 之后执行：Flutter 引擎已就位，这一步基本是增量重建，
+      # 主要用来把扩展 target 编译时未截断、未压制的完整错误信息打印出来。
       - name: Debug Swift Extension with raw xcodebuild
         run: |
           cd ios
           xcodebuild -workspace Runner.xcworkspace -scheme PacketTunnelExtension -configuration Release build CODE_SIGNING_ALLOWED=NO
-
-      - name: Build Flutter iOS (no codesign)
-        run: flutter build ios --release --no-codesign
 
       - name: Set up Ruby
         uses: ruby/setup-ruby@v1
