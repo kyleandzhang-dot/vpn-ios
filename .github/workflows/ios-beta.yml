@@ -272,7 +272,7 @@ jobs:
           echo "📱 手机Safari打开下面链接直接安装:"
           echo "$INSTALL_LINK"
           echo "=================================================="
-          echo "### 📱 安装链接" >> "$GITHUB_STEP_SUMMARY"
+          echo "### 📱 安装链接手机" >> "$GITHUB_STEP_SUMMARY"
           echo "\`$INSTALL_LINK\`" >> "$GITHUB_STEP_SUMMARY"
           echo "" >> "$GITHUB_STEP_SUMMARY"
           echo "[点击安装](${INSTALL_LINK})" >> "$GITHUB_STEP_SUMMARY"
