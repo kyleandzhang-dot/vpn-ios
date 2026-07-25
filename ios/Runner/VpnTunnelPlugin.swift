@@ -61,7 +61,7 @@ public class VpnTunnelPlugin: NSObject, FlutterPlugin, FlutterStreamHandler {
             proto.providerConfiguration = ["node_json": nodeJson]
 
             manager.protocolConfiguration = proto
-            manager.localizedDescription = "秒连VPN"
+            manager.localizedDescription = "喵脸"
             manager.isEnabled = true
 
             manager.saveToPreferences { saveError in

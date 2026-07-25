@@ -435,7 +435,7 @@ class CustomVpnService : VpnService() {
         )
 
         return NotificationCompat.Builder(this, CHANNEL_ID)
-            .setContentTitle("秒连 VPN")
+            .setContentTitle("喵脸 VPN")
             .setContentText("正在为您提供安全连接...")
             .setSmallIcon(android.R.drawable.ic_secure)
             .setContentIntent(pendingIntent)

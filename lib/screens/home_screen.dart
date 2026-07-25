@@ -41,7 +41,7 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
   bool _isCheckinLoading = false;
   bool _isCheckinDialogSubmitting = false; 
   int _checkinStreak = 0;
-  int _checkinRewardMinutes = 20;
+  int _checkinRewardMinutes = 30;
   bool _pendingCheckinPopup = false;
 
   // ================= 节点选择 =================
@@ -154,7 +154,7 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
       setState(() {
         _checkedInToday = checkinData['data']['checked_today'] ?? false;
         _checkinStreak = checkinData['data']['streak_days'] ?? 0;
-        _checkinRewardMinutes = checkinData['data']['reward_minutes'] ?? 20;
+        _checkinRewardMinutes = checkinData['data']['reward_minutes'] ?? 30;
       });
     }
 

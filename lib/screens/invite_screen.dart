@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:share_plus/share_plus.dart';
 import '../config/app_config.dart';
 import '../services/api_service.dart';
 
@@ -19,6 +20,23 @@ class _InviteScreenState extends State<InviteScreen> {
   final TextEditingController _bindController = TextEditingController();
   final List<int> _nodes = [1, 3, 5, 10];
   final List<String> _rewards = ['+2天', '+3天', '+7天', '+18天'];
+
+  // TODO: 换成实际的官网/下载页地址（比如放 App Store / APK 直链的落地页），
+  // 好友点开分享出去的链接后能在这个页面下载 App
+  static const String _downloadUrl = 'https://your-domain.com/download';
+
+  void _shareInvite() {
+    if (_inviteCode.isEmpty || _inviteCode == "加载中..." || _inviteCode == "获取失败") {
+      _showToast("邀请码还没准备好，请稍后再试");
+      return;
+    }
+    final text = '我在用「喵脸」，注册即送免费时长～\n'
+        '用我的邀请码 $_inviteCode 一起解锁更多免费时长：\n'
+        '$_downloadUrl';
+    SharePlus.instance.share(
+      ShareParams(text: text, subject: '邀请你一起用「喵脸」'),
+    );
+  }
 
   @override
   void initState() {
@@ -260,20 +278,38 @@ class _InviteScreenState extends State<InviteScreen> {
                 ),
               ),
               const SizedBox(height: 16),
-              OutlinedButton(
-                style: OutlinedButton.styleFrom(
-                  foregroundColor: AppConfig.colorPrimary,
-                  side: const BorderSide(color: AppConfig.colorPrimary),
-                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
-                  padding: const EdgeInsets.symmetric(horizontal: 32, vertical: 12),
-                ),
-                onPressed: () {
-                  if (_inviteCode.isNotEmpty && _inviteCode != "加载中..." && _inviteCode != "获取失败") {
-                    Clipboard.setData(ClipboardData(text: _inviteCode));
-                    _showToast("已复制到剪贴板");
-                  }
-                },
-                child: const Text("复制代码"),
+              Row(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  ElevatedButton.icon(
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: AppConfig.colorPrimary,
+                      foregroundColor: Colors.white,
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                      padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
+                      elevation: 0,
+                    ),
+                    onPressed: _shareInvite,
+                    icon: const Icon(Icons.share, size: 18),
+                    label: const Text("分享邀请"),
+                  ),
+                  const SizedBox(width: 12),
+                  OutlinedButton(
+                    style: OutlinedButton.styleFrom(
+                      foregroundColor: AppConfig.colorPrimary,
+                      side: const BorderSide(color: AppConfig.colorPrimary),
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                      padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
+                    ),
+                    onPressed: () {
+                      if (_inviteCode.isNotEmpty && _inviteCode != "加载中..." && _inviteCode != "获取失败") {
+                        Clipboard.setData(ClipboardData(text: _inviteCode));
+                        _showToast("已复制到剪贴板");
+                      }
+                    },
+                    child: const Text("复制代码"),
+                  ),
+                ],
               ),
             ],
           ),
