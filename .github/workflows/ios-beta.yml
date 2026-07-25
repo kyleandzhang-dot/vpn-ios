@@ -221,7 +221,7 @@ jobs:
                               <key>kind</key>
                               <string>software-package</string>
                               <key>url</key>
-                              <string>${{ secrets.R2_PUBLIC_URL }}/${{ steps.build_info.outputs.ipa_name }}</string>
+                              <string>${{ vars.R2_PUBLIC_URL }}/${{ steps.build_info.outputs.ipa_name }}</string>
                           </dict>
                       </array>
                       <key>metadata</key>
@@ -266,13 +266,47 @@ jobs:
 
       - name: Print install link
         run: |
-          MANIFEST_URL="${{ secrets.R2_PUBLIC_URL }}/manifest-${{ steps.build_info.outputs.build_time }}.plist"
+          MANIFEST_URL="${{ vars.R2_PUBLIC_URL }}/manifest-${{ steps.build_info.outputs.build_time }}.plist"
           INSTALL_LINK="itms-services://?action=download-manifest&url=${MANIFEST_URL}"
+          echo "$INSTALL_LINK" > install_link.txt
           echo "=================================================="
           echo "📱 手机Safari打开下面链接直接安装:"
           echo "$INSTALL_LINK"
           echo "=================================================="
-          echo "### 📱 安装链接手机" >> "$GITHUB_STEP_SUMMARY"
+          echo "### 📱 安装链接" >> "$GITHUB_STEP_SUMMARY"
           echo "\`$INSTALL_LINK\`" >> "$GITHUB_STEP_SUMMARY"
           echo "" >> "$GITHUB_STEP_SUMMARY"
           echo "[点击安装](${INSTALL_LINK})" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Generate QR code and upload to R2
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+        run: |
+          if ! command -v qrencode &> /dev/null; then
+            brew install qrencode
+          fi
+
+          INSTALL_LINK=$(cat install_link.txt)
+          qrencode -o qrcode.png -s 10 -m 2 "$INSTALL_LINK"
+
+          ENDPOINT="https://${{ secrets.R2_ACCOUNT_ID }}.r2.cloudflarestorage.com"
+          QR_NAME="qrcode-${{ steps.build_info.outputs.build_time }}.png"
+
+          aws s3 cp qrcode.png \
+            "s3://${{ secrets.R2_BUCKET }}/${QR_NAME}" \
+            --endpoint-url "$ENDPOINT" \
+            --content-type "image/png"
+
+          echo "qr_name=${QR_NAME}" >> "$GITHUB_OUTPUT"
+        id: qr
+
+      - name: Embed QR code in Summary
+        run: |
+          QR_URL="${{ vars.R2_PUBLIC_URL }}/${{ steps.qr.outputs.qr_name }}"
+          {
+            echo ""
+            echo "### 📷 扫码安装 (iPhone相机或微信扫一扫)"
+            echo ""
+            echo "![install qrcode](${QR_URL})"
+          } >> "$GITHUB_STEP_SUMMARY"
