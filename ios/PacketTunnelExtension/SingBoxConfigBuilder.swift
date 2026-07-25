@@ -57,12 +57,21 @@ enum SingBoxConfigBuilder {
 
         // 3. 组装标准 config.json
         let config: [String: Any] = [
-            "log": ["level": "warn"],
+            "log": ["level": "info"],
             "dns": [
                 "servers": [
                     ["tag": "dns-remote", "type": "udp", "server": "1.1.1.1", "detour": "proxy"],
-                    ["tag": "dns-local", "type": "udp", "server": "223.5.5.5"]
-                ]
+                    ["tag": "dns-local", "type": "udp", "server": "223.5.5.5", "detour": "direct"]
+                ],
+                // 关键修复：如果代理服务器地址填的是域名，出站(outbound)自己去连接
+                // 服务器之前得先解析这个域名。如果这个解析也走 dns-remote(经代理)，
+                // 就会死循环：连代理需要先解析域名 -> 解析域名需要经过代理 -> 代理还没连上。
+                // "outbound": "any" 专门匹配这种"由出站发起的解析请求"(不是客户端 App
+                // 自己发起的 DNS 查询)，让它强制走 dns-local 直连解析，从而打破死循环。
+                "rules": [
+                    ["outbound": "any", "server": "dns-local"]
+                ],
+                "final": "dns-remote"
             ],
             "inbounds": [
                 [
