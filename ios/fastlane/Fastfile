@@ -57,4 +57,57 @@ platform :ios do
       skip_waiting_for_build_processing: true
     )
   end
+
+  desc "Build Ad Hoc ipa for direct install (R2/Diawi分发，不走TestFlight，不受每日上传限额影响)"
+  lane :adhoc do
+    setup_ci
+
+    api_key = app_store_connect_api_key(
+      key_id: ENV["APP_STORE_CONNECT_API_KEY_ID"],
+      issuer_id: ENV["APP_STORE_CONNECT_API_ISSUER_ID"],
+      key_content: ENV["APP_STORE_CONNECT_API_KEY_CONTENT"],
+      is_key_content_base64: true
+    )
+
+    match(
+      type: "adhoc",
+      readonly: false,
+      api_key: api_key,
+      app_identifier: [
+        "com.miaolian.myvpn",
+        "com.miaolian.myvpn.PacketTunnelExtension"
+      ]
+    )
+
+    update_code_signing_settings(
+      use_automatic_signing: false,
+      path: "Runner.xcodeproj",
+      team_id: "85F7XUQB6K",
+      code_sign_identity: "Apple Distribution",
+      profile_name: "match AdHoc com.miaolian.myvpn",
+      targets: ["Runner"]
+    )
+
+    update_code_signing_settings(
+      use_automatic_signing: false,
+      path: "Runner.xcodeproj",
+      team_id: "85F7XUQB6K",
+      code_sign_identity: "Apple Distribution",
+      profile_name: "match AdHoc com.miaolian.myvpn.PacketTunnelExtension",
+      targets: ["PacketTunnelExtension"]
+    )
+
+    build_app(
+      workspace: "Runner.xcworkspace",
+      scheme: "Runner",
+      export_method: "ad-hoc",
+      output_name: "Runner.ipa",
+      export_options: {
+        provisioningProfiles: {
+          "com.miaolian.myvpn" => "match AdHoc com.miaolian.myvpn",
+          "com.miaolian.myvpn.PacketTunnelExtension" => "match AdHoc com.miaolian.myvpn.PacketTunnelExtension"
+        }
+      }
+    )
+  end
 end
