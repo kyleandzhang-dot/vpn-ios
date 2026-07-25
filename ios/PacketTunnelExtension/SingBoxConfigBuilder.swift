@@ -60,11 +60,8 @@ enum SingBoxConfigBuilder {
             "log": ["level": "warn"],
             "dns": [
                 "servers": [
-                    ["tag": "dns-remote", "address": "1.1.1.1", "detour": "proxy"],
-                    ["tag": "dns-local", "address": "223.5.5.5", "detour": "direct"]
-                ],
-                "rules": [
-                    ["outbound": "any", "server": "dns-local"]
+                    ["tag": "dns-remote", "type": "udp", "server": "1.1.1.1", "detour": "proxy"],
+                    ["tag": "dns-local", "type": "udp", "server": "223.5.5.5", "detour": "direct"]
                 ]
             ],
             "inbounds": [
@@ -73,18 +70,20 @@ enum SingBoxConfigBuilder {
                     "tag": "tun-in",
                     "inet4_address": "172.19.0.1/30",
                     "auto_route": true,
-                    "strict_route": true,
-                    "sniff": true
+                    "strict_route": true
                 ]
             ],
             "outbounds": [
                 outbound,
-                ["type": "direct", "tag": "direct"],
-                ["type": "dns", "tag": "dns-out"]
+                ["type": "direct", "tag": "direct"]
             ],
             "route": [
                 "auto_detect_interface": true,
-                "final": "proxy"
+                "final": "proxy",
+                "rules": [
+                    ["action": "sniff"],
+                    ["protocol": "dns", "action": "hijack-dns"]
+                ]
             ]
         ]
 
