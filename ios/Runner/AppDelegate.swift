@@ -44,8 +44,9 @@ import UIKit
     }
 
     guard let rootVC = UIApplication.shared.connectedScenes
-      .compactMap({ ($0 as? UIWindowScene)?.keyWindow })
-      .first?.rootViewController else {
+      .compactMap({ $0 as? UIWindowScene })
+      .flatMap({ $0.windows })
+      .first(where: { $0.isKeyWindow })?.rootViewController else {
       print("[Debug] 找不到 rootViewController，无法弹分享面板")
       return
     }
