@@ -1,20 +1,33 @@
-// ios/Runner/VpnTunnelPlugin.swift
 import Flutter
-import UIKit
 import NetworkExtension
 
+// 放进 Runner 主 App target。
+// Channel 名字跟你 Dart 侧 vpn_bridge.dart 里的完全一致,
+// 所以 Dart 代码一行都不用改。
+
 public class VpnTunnelPlugin: NSObject, FlutterPlugin, FlutterStreamHandler {
-    
+
     private var eventSink: FlutterEventSink?
-    private var vpnManager: NETunnelProviderManager?
+    private var manager: NETunnelProviderManager?
+    private let appGroup = "group.com.example.vpnAll" // 要跟 Extension 里的一致
+    private let providerBundleId = "com.example.vpnAll.PacketTunnel" // 要跟 Extension target 的 Bundle Identifier 一致
 
     public static func register(with registrar: FlutterPluginRegistrar) {
-        let channel = FlutterMethodChannel(name: "com.example.vpn_all/vpn", binaryMessenger: registrar.messenger())
         let instance = VpnTunnelPlugin()
-        registrar.addMethodCallDelegate(instance, channel: channel)
-        
-        let eventChannel = FlutterEventChannel(name: "com.example.vpn_all/vpn_status", binaryMessenger: registrar.messenger())
+
+        let methodChannel = FlutterMethodChannel(
+            name: "com.example.vpn_all/vpn",
+            binaryMessenger: registrar.messenger()
+        )
+        registrar.addMethodCallDelegate(instance, channel: methodChannel)
+
+        let eventChannel = FlutterEventChannel(
+            name: "com.example.vpn_all/vpn_status",
+            binaryMessenger: registrar.messenger()
+        )
         eventChannel.setStreamHandler(instance)
+
+        instance.observeExtensionStatus()
     }
 
     public func handle(_ call: FlutterMethodCall, result: @escaping FlutterResult) {
@@ -22,115 +35,136 @@ public class VpnTunnelPlugin: NSObject, FlutterPlugin, FlutterStreamHandler {
         case "connect":
             guard let args = call.arguments as? [String: Any],
                   let nodeJson = args["node_json"] as? String else {
-                result(FlutterError(code: "PARAM_ERROR", message: "缺少 node_json 参数", details: nil))
+                result(FlutterError(code: "BAD_ARGS", message: "缺少 node_json", details: nil))
                 return
             }
-            startSingBoxVpn(nodeJson: nodeJson, result: result)
-            
+            connect(nodeJson: nodeJson, result: result)
         case "disconnect":
-            stopSingBoxVpn(result: result)
-            
+            disconnect(result: result)
+        case "getDeviceId":
+            // 跟 PacketTunnelProvider 里用的是同一个 DeviceIdManager，
+            // 保证主 App 和 Extension 拿到的是同一个设备号
+            result(DeviceIdManager.getDeviceId())
         default:
             result(FlutterMethodNotImplemented)
         }
     }
 
-    // --- EventChannel 状态监听 ---
-    public func onListen(withArguments arguments: Any?, eventSink events: @escaping FlutterEventSink) -> FlutterError? {
-        self.eventSink = events
-        // 监听 iOS 系统 VPN 状态变化
-        NotificationCenter.default.addObserver(
-            self,
-            selector: #selector(onVpnStatusChanged),
-            name: .NEVPNStatusDidChange,
-            object: nil
-        )
-        return nil
-    }
+    // MARK: - connect / disconnect
 
-    public func onCancel(withArguments arguments: Any?) -> FlutterError? {
-        NotificationCenter.default.removeObserver(self, name: .NEVPNStatusDidChange, object: nil)
-        self.eventSink = nil
-        return nil
-    }
-
-    @objc private func onVpnStatusChanged() {
-        guard let status = vpnManager?.connection.status else { return }
-        switch status {
-        case .connecting, .reasserting:
-            eventSink?("CONNECTING")
-        case .connected:
-            eventSink?("CONNECTED")
-        case .disconnected, .invalid:
-            eventSink?("DISCONNECTED")
-        default:
-            break
-        }
-    }
-
-    // --- NETunnelProviderManager 核心控制 ---
-    private func startSingBoxVpn(nodeJson: String, result: @escaping FlutterResult) {
-        // 先向 UI 发送正在连接的状态，避免 Flutter UI 傻等
-        self.eventSink?("CONNECTING")
-        
-        // 1. 从系统加载或创建 VPN 配置
-        NETunnelProviderManager.loadAllFromPreferences { [weak self] managers, error in
-            guard let self = self else { return }
-            
-            if let error = error {
-                print("[iOS Native] 加载 VPN 配置失败: \(error.localizedDescription)")
-                self.eventSink?("DISCONNECTED")
-                result(FlutterError(code: "VPN_ERROR", message: error.localizedDescription, details: nil))
+    private func connect(nodeJson: String, result: @escaping FlutterResult) {
+        loadOrCreateManager { [weak self] manager, error in
+            guard let self = self, let manager = manager else {
+                result(FlutterError(code: "MANAGER_ERR", message: error?.localizedDescription, details: nil))
                 return
             }
-            
-            // 如果已有配置则复用，没有则新建
-            let manager = managers?.first ?? NETunnelProviderManager()
-            self.vpnManager = manager
-            
-            // 2. 配置协议 (⚠️ 注意：这里的 Bundle Identifier 必须指向你的 NetworkExtension Target)
-            let protocolConfiguration = NETunnelProviderProtocol()
 
-            // ⚠️ 必须一字不差地换成你图里的 Bundle Identifier！
-            protocolConfiguration.providerBundleIdentifier = "com.miaolian.myvpn.PacketTunnelExtension"
+            let proto = NETunnelProviderProtocol()
+            proto.providerBundleIdentifier = self.providerBundleId
+            proto.serverAddress = "miaolian-vpn" // 随便填一个非空标识即可,系统不关心内容
+            proto.providerConfiguration = ["node_json": nodeJson]
 
-            protocolConfiguration.serverAddress = "SingBox VPN"
-            
-            // 3. 把节点 JSON 数据塞进配置里，供后台 Extension 扩展读取
-            protocolConfiguration.providerConfiguration = ["node_json": nodeJson]
-            
-            manager.protocolConfiguration = protocolConfiguration
-            manager.localizedDescription = "MiaoLian VPN"
+            manager.protocolConfiguration = proto
+            manager.localizedDescription = "秒连VPN"
             manager.isEnabled = true
-            
-            // 4. 保存到系统设置并启动
-            manager.saveToPreferences { error in
-                if let error = error {
-                    print("[iOS Native] 保存 VPN 设置失败: \(error.localizedDescription)")
-                    self.eventSink?("DISCONNECTED")
-                    result(FlutterError(code: "SAVE_ERROR", message: error.localizedDescription, details: nil))
+
+            manager.saveToPreferences { saveError in
+                if let saveError = saveError {
+                    result(FlutterError(code: "SAVE_ERR", message: saveError.localizedDescription, details: nil))
                     return
                 }
-                
-                // 重新加载一次以确保权限和配置生效
-                manager.loadFromPreferences { error in
+                // 保存后要 reload 一次才能拿到有效的 connection 对象
+                manager.loadFromPreferences { loadError in
+                    if let loadError = loadError {
+                        result(FlutterError(code: "LOAD_ERR", message: loadError.localizedDescription, details: nil))
+                        return
+                    }
                     do {
                         try manager.connection.startVPNTunnel()
-                        print("[iOS Native] 隧道启动指令已发出")
+                        self.manager = manager
                         result(nil)
                     } catch {
-                        print("[iOS Native] 启动隧道异常: \(error.localizedDescription)")
-                        self.eventSink?("DISCONNECTED")
-                        result(FlutterError(code: "START_ERROR", message: error.localizedDescription, details: nil))
+                        result(FlutterError(code: "START_ERR", message: error.localizedDescription, details: nil))
                     }
                 }
             }
         }
     }
 
-    private func stopSingBoxVpn(result: @escaping FlutterResult) {
-        vpnManager?.connection.stopVPNTunnel()
-        self.eventSink?("DISCONNECTED")
+    private func disconnect(result: @escaping FlutterResult) {
+        manager?.connection.stopVPNTunnel()
         result(nil)
+    }
+
+    private func loadOrCreateManager(_ completion: @escaping (NETunnelProviderManager?, Error?) -> Void) {
+        NETunnelProviderManager.loadAllFromPreferences { managers, error in
+            if let error = error {
+                completion(nil, error)
+                return
+            }
+            if let existing = managers?.first {
+                completion(existing, nil)
+            } else {
+                completion(NETunnelProviderManager(), nil)
+            }
+        }
+    }
+
+    // MARK: - 状态上报
+
+    public func onListen(withArguments arguments: Any?, eventSink events: @escaping FlutterEventSink) -> FlutterError? {
+        self.eventSink = events
+        return nil
+    }
+
+    public func onCancel(withArguments arguments: Any?) -> FlutterError? {
+        self.eventSink = nil
+        return nil
+    }
+
+    // 系统级状态变化(连接中/已断开等)
+    private func observeExtensionStatus() {
+        NotificationCenter.default.addObserver(
+            forName: .NEVPNStatusDidChange,
+            object: nil,
+            queue: .main
+        ) { [weak self] notification in
+            guard let connection = notification.object as? NEVPNConnection else { return }
+            self?.emit(forSystemStatus: connection.status)
+        }
+
+        // 自定义状态(比如 EXPIRED)通过 App Group + Darwin 通知从 Extension 传回来
+        CFNotificationCenterAddObserver(
+            CFNotificationCenterGetDarwinNotifyCenter(),
+            Unmanaged.passUnretained(self).toOpaque(),
+            { _, observer, _, _, _ in
+                guard let observer = observer else { return }
+                let mySelf = Unmanaged<VpnTunnelPlugin>.fromOpaque(observer).takeUnretainedValue()
+                mySelf.emitCustomStatusFromAppGroup()
+            },
+            "com.example.vpnAll.statusChanged" as CFString,
+            nil,
+            .deliverImmediately
+        )
+    }
+
+    private func emit(forSystemStatus status: NEVPNStatus) {
+        switch status {
+        case .connected:
+            eventSink?("CONNECTED")
+        case .connecting, .reasserting:
+            eventSink?("CONNECTING")
+        case .disconnected, .invalid, .disconnecting:
+            eventSink?("DISCONNECTED")
+        @unknown default:
+            eventSink?("DISCONNECTED")
+        }
+    }
+
+    private func emitCustomStatusFromAppGroup() {
+        let defaults = UserDefaults(suiteName: appGroup)
+        if let status = defaults?.string(forKey: "vpn_status") {
+            eventSink?(status) // 主要用来传 "EXPIRED"
+        }
     }
 }

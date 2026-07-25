@@ -2,10 +2,11 @@ import 'dart:convert';
 import 'dart:io';
 import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
-import 'package:device_info_plus/device_info_plus.dart';
 import 'package:android_id/android_id.dart';
 import 'package:uuid/uuid.dart';
 import '../config/app_config.dart';
+// ⚠️ 按你项目实际路径改一下这个 import
+import 'vpn_bridge.dart';
 
 class ApiService {
   static const _androidIdPlugin = AndroidId();
@@ -26,9 +27,15 @@ class ApiService {
             ?.replaceAll('-', '')
             .toUpperCase();
       } else if (Platform.isIOS) {
-        final deviceInfo = DeviceInfoPlugin();
-        final iosInfo = await deviceInfo.iosInfo;
-        deviceId = iosInfo.identifierForVendor?.replaceAll('-', '').toUpperCase();
+        // 不再用 identifierForVendor：那个值只在主 App 进程里生成/缓存，
+        // 跟 Network Extension（PacketTunnelProvider）里 DeviceIdManager
+        // 走 Keychain 生成的 ID 是两份完全不同的值，会导致后台隧道心跳
+        // 检测账号状态时用的 device_id 跟登录/付费用的对不上。
+        // 改成走 native 方法通道，读同一份存在共享 Keychain 里的 ID。
+        final nativeId = await VpnBridge.getDeviceId();
+        deviceId = nativeId.isNotEmpty
+            ? nativeId.replaceAll('-', '').toUpperCase()
+            : null;
       }
     } catch (_) {
       deviceId = null;

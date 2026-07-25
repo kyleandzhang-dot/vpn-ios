@@ -13,9 +13,15 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
 
     // 换成你自己的 App Group ID
     private let appGroup = "group.com.miaolian.myvpn"
+    
+    // 获取由 Keychain 永久持久化的设备唯一标识
+    private var deviceId: String {
+        return DeviceIdManager.getDeviceId()
+    }
 
     override func startTunnel(options: [String : NSObject]?, completionHandler: @escaping (Error?) -> Void) {
-        NSLog("[Tunnel] 开始执行 startTunnel MARKER-V3")
+        // 打印出当前设备编号，证明底层 Extension 已经能成功从 Keychain 读取 ID
+        NSLog("[Tunnel] 开始执行 startTunnel MARKER-V3，设备编号(Keychain): %@", deviceId)
 
         setenv("GOMEMLIMIT", "30MiB", 1)
         setenv("GOGC", "20", 1)
@@ -169,6 +175,31 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
 
         semaphore.wait()
         return tunFd
+    }
+    
+    // MARK: - 原生心跳与鉴权辅助方法 (可选)
+    
+    /// 如果需要在 iOS 隧道进程里直接向服务器发心跳或检测是否到期，可以随时调用这个方法
+    /// 它直接使用当前 Keychain 中的 deviceId，不依赖 Flutter 前台
+    private func checkUserStatus(apiBaseUrl: String) {
+        guard let url = URL(string: "\(apiBaseUrl)/api/v1/check_status") else { return }
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.timeoutInterval = 5.0
+        
+        // 使用本进程从 Keychain 取到的相同 ID
+        let json: [String: Any] = ["device_id": self.deviceId]
+        request.httpBody = try? JSONSerialization.data(withJSONObject: json)
+        
+        let task = URLSession.shared.dataTask(with: request) { [weak self] data, response, error in
+            if let httpRes = response as? HTTPURLResponse, httpRes.statusCode == 403 {
+                NSLog("[Tunnel] 心跳返回 403，账号服务已到期，正在自动断开连接...")
+                // 当后台隧道检测到到期时，直接主动断开隧道
+                self?.cancelTunnelWithError(NSError(domain: "PacketTunnel", code: 403, userInfo: [NSLocalizedDescriptionKey: "服务已到期"]))
+            }
+        }
+        task.resume()
     }
 }
 

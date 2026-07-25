@@ -57,4 +57,14 @@ class VpnBridge {
       rethrow;
     }
   }
+
+  static Future<String> getDeviceId() async {
+    try {
+      // 通过已经定义好的 _channel ('com.example.vpn_all/vpn') 调用原生方法[cite: 2]
+      final String? deviceId = await _channel.invokeMethod('getDeviceId');
+      return deviceId ?? '';
+    } catch (e) {
+      return '';
+    }
+  }
 }
