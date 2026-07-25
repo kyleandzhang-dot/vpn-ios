@@ -105,6 +105,36 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
         completionHandler()
     }
 
+    // utun 相关常量:PF_SYSTEM socket 族里 SYSPROTO_CONTROL 的 getsockopt 选项。
+    // 这是 XNU 内核层面的稳定 ABI,不依赖 NEPacketTunnelFlow 的任何私有属性,
+    // 是 WireGuard / sing-box 官方客户端等主流实现都在用的做法。
+    private static let SYSPROTO_CONTROL: Int32 = 2
+    private static let UTUN_OPT_IFNAME: Int32 = 2
+    private static let maxScanFd: Int32 = 1024
+
+    /// 遍历当前进程打开的文件描述符,找到那个是 utun 接口的 fd。
+    /// 找不到返回 nil,并打印扫描了多少个 fd 方便排查。
+    fileprivate func findTunFileDescriptor() -> Int32? {
+        var buffer = [UInt8](repeating: 0, count: 64)
+        var scanned = 0
+        for fd: Int32 in 0...Self.maxScanFd {
+            var len = socklen_t(buffer.count)
+            let result = buffer.withUnsafeMutableBytes { ptr -> Int32 in
+                getsockopt(fd, Self.SYSPROTO_CONTROL, Self.UTUN_OPT_IFNAME, ptr.baseAddress, &len)
+            }
+            if result == 0 {
+                scanned += 1
+                let name = String(cString: buffer)
+                if name.hasPrefix("utun") {
+                    NSLog("[Tunnel] 找到 utun 接口: %@，fd=%d MARKER-V3", name, fd)
+                    return fd
+                }
+            }
+        }
+        NSLog("[Tunnel] 未找到 utun fd，共探测到 %d 个 SYSPROTO_CONTROL socket MARKER-V3", scanned)
+        return nil
+    }
+
     fileprivate func openTun(options: LibboxTunOptionsProtocol) -> Int32 {
         var tunFd: Int32 = -1
         let semaphore = DispatchSemaphore(value: 0)
@@ -124,14 +154,10 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
             if let error = error {
                 NSLog("[Tunnel] 设置网络参数失败: %@", error.localizedDescription)
             } else if let self = self {
-                if self.packetFlow.responds(to: NSSelectorFromString("socket")) {
-                    if let socket = self.packetFlow.value(forKey: "socket") as? NSObject {
-                        if socket.responds(to: NSSelectorFromString("fileDescriptor")) {
-                            if let fd = socket.value(forKey: "fileDescriptor") as? Int32 {
-                                tunFd = fd
-                            }
-                        }
-                    }
+                if let fd = self.findTunFileDescriptor() {
+                    tunFd = fd
+                } else {
+                    NSLog("[Tunnel] 未能获取 TUN fd，请检查系统版本兼容性 MARKER-V3")
                 }
             }
             semaphore.signal()
