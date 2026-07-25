@@ -14,10 +14,8 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
     private let appGroup = "group.com.miaolian.myvpn"
 
     override func startTunnel(options: [String : NSObject]?, completionHandler: @escaping (Error?) -> Void) {
-        NSLog("[Tunnel] 开始执行 startTunnel")
-        
-        // ⚠️ 核心防崩修复 1：苹果对 VPN 后台内存限制极严(~15M-30M)，
-        // 必须在 Libbox 初始化前强制限制 Golang 内存分配，否则秒被 iOS 系统的 Jetsam (OOM) 强杀！
+        NSLog("[Tunnel] 开始执行 startTunnel MARKER-V3")
+
         setenv("GOMEMLIMIT", "30MiB", 1)
         setenv("GOGC", "20", 1)
 
@@ -35,6 +33,12 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
             }
             let basePath = containerURL.appendingPathComponent("libbox").path
             try? FileManager.default.createDirectory(atPath: basePath, withIntermediateDirectories: true)
+
+            // 诊断用：把 stderr 重定向到文件——Go 的 panic / fatal error 默认打印到 stderr，
+            // 系统崩溃报告器抓不到这些文字，但这样能把它落盘保存下来。
+            let stderrLogPath = (basePath as NSString).appendingPathComponent("go_stderr.log")
+            freopen(stderrLogPath, "a+", stderr)
+            NSLog("[Tunnel] stderr 已重定向到: %@ MARKER-V3", stderrLogPath)
 
             if !PacketTunnelProvider.didSetup {
                 let setupOptions = LibboxSetupOptions()
@@ -61,20 +65,17 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
             self.commandServer = server
 
             try server.start()
-            
-            // ⚠️ 核心防崩修复 2：将服务启动放入后台线程！
-            // 避免 startOrReloadService 同步调回 openTun 时与 Main Thread 产生信号量死锁
+
             DispatchQueue.global(qos: .userInitiated).async { [weak self] in
                 guard let self = self, let server = self.commandServer else { return }
                 do {
                     // ⚠️ 关键修复：sing-box 的 StartOrReloadService 内部直接访问
                     // options.AutoRedirect 等字段，没有做 nil 判断。传 nil 会导致
                     // Go 侧空指针崩溃（panic: invalid memory address or nil pointer dereference）。
-                    // 必须传一个真正的空对象，而不是 nil。
                     let overrideOptions = LibboxOverrideOptions()
-                    NSLog("[Tunnel] === 使用修复版代码 MARKER-V2，options 非空: %@ ===", overrideOptions)
+                    NSLog("[Tunnel] === 即将调用 startOrReloadService，options 非空: %@ MARKER-V3 ===", overrideOptions)
                     try server.startOrReloadService(configJson, options: overrideOptions)
-                    NSLog("[Tunnel] Libbox 服务启动成功！")
+                    NSLog("[Tunnel] Libbox 服务启动成功！MARKER-V3")
                     DispatchQueue.main.async {
                         completionHandler(nil)
                     }
@@ -123,8 +124,6 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
             if let error = error {
                 NSLog("[Tunnel] 设置网络参数失败: %@", error.localizedDescription)
             } else if let self = self {
-                // ⚠️ 核心防崩修复 3：安全反射获取 socket fd[cite: 6]，
-                // 避免直接 KVC 在现代 iOS 上触发 NSUnknownKeyException 导致进程瞬间秒崩！
                 if self.packetFlow.responds(to: NSSelectorFromString("socket")) {
                     if let socket = self.packetFlow.value(forKey: "socket") as? NSObject {
                         if socket.responds(to: NSSelectorFromString("fileDescriptor")) {
