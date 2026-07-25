@@ -95,13 +95,35 @@ class ApiService {
     return json.decode(response.body);
   }
 
-  static Future<http.Response> getNode() async {
+  static Future<http.Response> getNode({String? nodeId}) async {
     final deviceId = await getDeviceId();
+    final body = <String, dynamic>{'device_id': deviceId};
+    if (nodeId != null && nodeId.isNotEmpty) {
+      body['node_id'] = nodeId; // 用户手动指定节点；不传 = 服务端自动负载均衡
+    }
     return await http.post(
       Uri.parse('${AppConfig.apiBaseUrl}/api/v1/get_node'),
       headers: {'Content-Type': 'application/json'},
-      body: json.encode({'device_id': deviceId}),
+      body: json.encode(body),
     ).timeout(const Duration(seconds: 5));
+  }
+
+  // ================= 节点列表 =================
+
+  /// 拉取可选节点列表（用于"手动选节点"面板）。网络异常/服务器错误时
+  /// 返回 {code: -1/状态码, msg: ...}，不抛异常，方便面板区分加载中/出错/空列表。
+  static Future<Map<String, dynamic>> fetchNodes() async {
+    try {
+      final response = await http
+          .get(Uri.parse('${AppConfig.apiBaseUrl}/api/v1/nodes'))
+          .timeout(const Duration(seconds: 8));
+      if (response.statusCode == 200) {
+        return json.decode(response.body);
+      }
+      return {'code': response.statusCode, 'msg': '服务器错误 ${response.statusCode}'};
+    } catch (_) {
+      return {'code': -1, 'msg': '网络连接异常'};
+    }
   }
 
   // ================= 每日签到 =================

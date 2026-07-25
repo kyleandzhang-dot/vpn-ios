@@ -25,10 +25,9 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
   StreamSubscription? _vpnSubscription;
   late AnimationController _ringAnimController;
 
-  String _statusText = "未连接";
-  String _statusType = "neutral";
+  // 【减法】：删除了 _statusText 和 _statusType，只保留核心到期时间
   String _expireText = "";
-  String _inviteBtnText = "获取免费时长";
+  String _inviteBtnText = "免费领时长";
   
   String _cfgBuyQQ = "1772757914";
   String _cfgAnnouncement = "";
@@ -37,14 +36,21 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
 
   bool _checkedInToday = false;
   bool _isCheckinLoading = false;
+  bool _isCheckinDialogSubmitting = false; 
   int _checkinStreak = 0;
   int _checkinRewardMinutes = 20;
+  bool _pendingCheckinPopup = false;
 
-  bool _isDialogActive = false;
+  // ================= 节点选择 =================
+  List<Map<String, dynamic>> _nodeList = [];
+  String? _selectedNodeId; 
+  String _selectedNodeLabel = "自动选线";
+  static const _prefsSelectedNodeIdKey = 'selected_node_id';
+  static const _prefsSelectedNodeLabelKey = 'selected_node_label';
+
+  bool _isDialogActive = false; 
   String? _pendingNodeJson;
 
-  // “连接中”状态的兜底超时：如果一直等不到 native 侧的 CONNECTED/DISCONNECTED
-  // 广播，15 秒后自动复位，避免转圈圈卡死、点了没反应。
   Timer? _connectTimeoutTimer;
   static const _connectTimeout = Duration(seconds: 15);
 
@@ -57,8 +63,6 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
     );
 
     _vpnSubscription = VpnBridge.statusStream.listen((state) {
-      // 只要 native 侧真的给了一个状态回应（不管是连上了还是断了），
-      // 说明这次连接流程有了结果，超时兜底就不需要了。
       _cancelConnectTimeout();
       setState(() {
         _vpnState = state;
@@ -82,11 +86,9 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
     _connectTimeoutTimer = Timer(_connectTimeout, () {
       if (!mounted || _vpnState != VpnState.connecting) return;
       debugPrint('[VPN] 连接超时（${_connectTimeout.inSeconds}s），自动复位');
-      VpnBridge.disconnect(); // 顺手清一下 native 侧可能残留的状态
+      VpnBridge.disconnect(); 
       setState(() {
         _vpnState = VpnState.disconnected;
-        _statusText = "连接超时";
-        _statusType = "error";
         _ringAnimController.stop();
       });
       _showToast("连接超时，请检查网络后重试");
@@ -101,23 +103,15 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
   void _updateUIByState(VpnState state) {
     switch (state) {
       case VpnState.disconnected:
-        _statusText = "未连接";
-        _statusType = "neutral";
         _ringAnimController.stop();
         break;
       case VpnState.connecting:
-        _statusText = "正在连接...";
-        _statusType = "neutral";
         _ringAnimController.repeat();
         break;
       case VpnState.connected:
-        _statusText = "安全连接已建立";
-        _statusType = "success";
         _ringAnimController.stop();
         break;
       case VpnState.expired:
-        _statusText = "服务已过期";
-        _statusType = "error";
         _ringAnimController.stop();
         _showToast("时长不足，请充值");
         _openRechargePage();
@@ -126,40 +120,84 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
   }
 
   Future<void> _initData() async {
-    ApiService.fetchConfig().then((data) {
-      if (data.isNotEmpty && data['data'] != null) {
-        final cfg = data['data'];
-        setState(() {
-          _cfgBuyQQ = cfg['buy_qq'] ?? _cfgBuyQQ;
-          _cfgAnnouncement = cfg['announcement'] ?? "";
-          _cfgAnnouncementTitle = cfg['announcement_title'] ?? "公告";
-        });
-        _checkAnnouncement();
-      }
-    });
-
     ApiService.fetchInviteInfo().then((data) {
       if (data['code'] == 200 && data['data'] != null) {
         final count = data['data']['invited_count'] ?? 0;
-        setState(() {
-          _inviteBtnText = count > 0 ? "获取免费时长 (已邀 $count 人)" : "获取免费时长";
-        });
+        if (mounted) {
+          setState(() {
+            _inviteBtnText = count > 0 ? "邀请奖励 (已邀$count人)" : "免费领时长";
+          });
+        }
       }
     });
 
-    ApiService.fetchCheckinStatus().then((data) {
-      if (data['code'] == 200 && data['data'] != null) {
-        setState(() {
-          _checkedInToday = data['data']['checked_today'] ?? false;
-          _checkinStreak = data['data']['streak_days'] ?? 0;
-          _checkinRewardMinutes = data['data']['reward_minutes'] ?? 20;
-        });
+    _loadNodes();
+    _loadSelectedNode();
+
+    final cfgData = await ApiService.fetchConfig();
+    bool willShowAnnouncement = false;
+    if (cfgData.isNotEmpty && cfgData['data'] != null) {
+      final cfg = cfgData['data'];
+      setState(() {
+        _cfgBuyQQ = cfg['buy_qq'] ?? _cfgBuyQQ;
+        _cfgAnnouncement = cfg['announcement'] ?? "";
+        _cfgAnnouncementTitle = cfg['announcement_title'] ?? "公告";
+      });
+      willShowAnnouncement = await _checkAnnouncement();
+    }
+
+    final checkinData = await ApiService.fetchCheckinStatus();
+    if (checkinData['code'] == 200 && checkinData['data'] != null) {
+      setState(() {
+        _checkedInToday = checkinData['data']['checked_today'] ?? false;
+        _checkinStreak = checkinData['data']['streak_days'] ?? 0;
+        _checkinRewardMinutes = checkinData['data']['reward_minutes'] ?? 20;
+      });
+    }
+
+    if (!_checkedInToday) {
+      if (willShowAnnouncement) {
+        _pendingCheckinPopup = true;
+      } else if (mounted) {
+        _showCheckinDialog();
       }
-    });
+    }
   }
 
-  Future<void> _checkAnnouncement() async {
-    if (_cfgAnnouncement.isEmpty) return;
+  Future<void> _loadNodes() async {
+    final data = await ApiService.fetchNodes();
+    if (data['code'] == 200 && data['data'] != null && mounted) {
+      setState(() {
+        _nodeList = List<Map<String, dynamic>>.from(data['data']);
+      });
+    }
+  }
+
+  Future<void> _loadSelectedNode() async {
+    final prefs = await SharedPreferences.getInstance();
+    final savedId = prefs.getString(_prefsSelectedNodeIdKey);
+    final savedLabel = prefs.getString(_prefsSelectedNodeLabelKey);
+    if (savedId != null && savedId.isNotEmpty && mounted) {
+      setState(() {
+        _selectedNodeId = savedId;
+        _selectedNodeLabel = savedLabel ?? "已选节点";
+      });
+    }
+  }
+
+  Future<void> _saveSelectedNode(String? nodeId, String label) async {
+    final prefs = await SharedPreferences.getInstance();
+    if (nodeId == null) {
+      await prefs.remove(_prefsSelectedNodeIdKey);
+      await prefs.remove(_prefsSelectedNodeLabelKey);
+    } else {
+      await prefs.setString(_prefsSelectedNodeIdKey, nodeId);
+      await prefs.setString(_prefsSelectedNodeLabelKey, label);
+    }
+  }
+
+  Future<bool> _checkAnnouncement() async {
+    if (_cfgAnnouncement.isEmpty) return false;
     final prefs = await SharedPreferences.getInstance();
     final hash = (_cfgAnnouncementTitle + _cfgAnnouncement).hashCode.toString();
     final lastHash = prefs.getString('last_read_announcement_hash');
@@ -167,6 +205,15 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
     if (hash != lastHash) {
       setState(() => _showNoticeDot = true);
       _showNoticeDialog();
+      return true;
+    }
+    return false;
+  }
+
+  void _maybeShowPendingCheckinPopup() {
+    if (_pendingCheckinPopup && !_checkedInToday) {
+      _pendingCheckinPopup = false;
+      _showCheckinDialog();
     }
   }
 
@@ -204,14 +251,12 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
 
     setState(() {
       _vpnState = VpnState.connecting;
-      _statusText = "正在获取节点...";
-      _statusType = "neutral";
       _ringAnimController.repeat();
     });
     _startConnectTimeout();
 
     try {
-      final res = await ApiService.getNode();
+      final res = await ApiService.getNode(nodeId: _selectedNodeId);
       if (res.statusCode == 200) {
         final jsonBody = json.decode(res.body);
         if (jsonBody['code'] == 200) {
@@ -234,8 +279,6 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
           _showToast(jsonBody['msg'] ?? "连接失败");
           setState(() {
             _vpnState = VpnState.disconnected;
-            _statusText = "连接失败";
-            _statusType = "error";
             _ringAnimController.stop();
           });
           return;
@@ -245,21 +288,15 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
         _showToast("获取节点失败: HTTP ${res.statusCode}");
         setState(() {
           _vpnState = VpnState.disconnected;
-          _statusText = "获取节点失败";
-          _statusType = "error";
           _ringAnimController.stop();
         });
         return;
       }
     } catch (e) {
-      // 这里失败说明是 getNode() 这次 HTTP 请求/解析出的问题，
-      // 跟 VpnBridge.connect() 建隧道那一步无关。
       debugPrint('[VPN] getNode 失败: $e');
       _cancelConnectTimeout();
       setState(() {
         _vpnState = VpnState.disconnected;
-        _statusText = "获取节点异常";
-        _statusType = "error";
         _ringAnimController.stop();
       });
       return;
@@ -268,50 +305,40 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
     try {
       await VpnBridge.connect(_pendingNodeJson!);
     } catch (e) {
-      // 这里失败说明是 iOS/Android 系统层面建立 VPN 隧道这一步炸的，
-      // 跟节点数据是否拿到无关，需要看原生日志（NetworkExtension/PacketTunnel）。
       debugPrint('[VPN] VpnBridge.connect 失败: $e');
       _cancelConnectTimeout();
       setState(() {
         _vpnState = VpnState.disconnected;
-        _statusText = "隧道建立失败";
-        _statusType = "error";
         _ringAnimController.stop();
       });
       _showToast("VPN 隧道建立失败: $e");
     }
   }
 
-  // 手动触发日志分享（测试按钮用）。因为"获取节点异常"这种问题跟隧道
-  // 建立无关，如果想看隧道那边（PacketTunnelProvider/sing-box）的日志，
-  // 得先真的尝试连接一次（哪怕失败），再点这个按钮把 go_stderr.log 分享出来。
-  Future<void> _handleShareLog() async {
-    final result = await VpnBridge.shareLog();
-    final success = result['success'] == true;
-    final message = result['message']?.toString() ?? (success ? "已分享" : "分享失败");
-    _showToast(message);
-  }
-
   void _showToast(String msg) {
     ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text(msg), duration: const Duration(seconds: 2))
+      SnackBar(
+        content: Text(msg, style: const TextStyle(fontSize: 13)), 
+        duration: const Duration(seconds: 2),
+        behavior: SnackBarBehavior.floating,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+        backgroundColor: const Color(0xFF333333),
+      )
     );
   }
 
   // ================= 业务交互弹窗 =================
 
   void _showNoticeDialog() {
+    _isDialogActive = true;
     showDialog(
       context: context,
       builder: (_) => Dialog(
         backgroundColor: Colors.white, 
         elevation: 0,
-        shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(8), 
-          side: const BorderSide(color: Color(0xFFEEEEEE), width: 1), 
-        ),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
         child: Padding(
-          padding: const EdgeInsets.all(28.0), 
+          padding: const EdgeInsets.fromLTRB(28, 28, 28, 24),
           child: Column(
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.start,
@@ -320,43 +347,40 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
                 _cfgAnnouncement.isNotEmpty ? _cfgAnnouncementTitle : "公告",
                 style: const TextStyle(
                   fontSize: 18,
-                  fontWeight: FontWeight.w600, 
+                  fontWeight: FontWeight.w700, 
                   color: Colors.black87,
-                  letterSpacing: 1.2, 
+                  letterSpacing: 0.5, 
                 ),
               ),
-              const SizedBox(height: 20),
+              const SizedBox(height: 16),
               Text(
                 _cfgAnnouncement.isNotEmpty ? _cfgAnnouncement : "暂无公告",
                 style: const TextStyle(
                   fontSize: 14,
-                  color: Colors.black54,
-                  height: 1.8, 
+                  color: Color(0xFF666666),
+                  height: 1.6, 
                 ),
               ),
-              const SizedBox(height: 36),
+              const SizedBox(height: 32),
               SizedBox(
                 width: double.infinity,
-                child: OutlinedButton(
-                  style: OutlinedButton.styleFrom(
-                    foregroundColor: Colors.black87, 
-                    side: const BorderSide(color: Colors.black87, width: 1), 
-                    shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(4), 
-                    ),
+                child: ElevatedButton(
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: AppConfig.colorPrimary,
+                    foregroundColor: Colors.white,
+                    elevation: 0,
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
                     padding: const EdgeInsets.symmetric(vertical: 14),
                   ),
                   onPressed: () {
                     Navigator.pop(context);
+                    _isDialogActive = false;
                     _markAnnouncementRead();
+                    _maybeShowPendingCheckinPopup();
                   },
                   child: const Text(
                     "我知道了",
-                    style: TextStyle(
-                      fontSize: 14,
-                      fontWeight: FontWeight.bold,
-                      letterSpacing: 1.5,
-                    ),
+                    style: TextStyle(fontSize: 15, fontWeight: FontWeight.w600),
                   ),
                 ),
               )
@@ -369,71 +393,69 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
 
   void _showRechargeDialog() {
     final controller = TextEditingController();
-
     showDialog(
       context: context,
       builder: (_) => Dialog(
-        backgroundColor: AppConfig.colorBg,
-        shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(22),
-        ),
+        backgroundColor: Colors.white,
+        elevation: 0,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
         child: Padding(
-          padding: const EdgeInsets.all(22),
+          padding: const EdgeInsets.fromLTRB(28, 28, 28, 24),
           child: Column(
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               const Text(
                 "卡密激活",
-                style: TextStyle(fontSize:20,fontWeight:FontWeight.bold),
+                style: TextStyle(fontSize: 18, fontWeight: FontWeight.w700, color: Colors.black87),
               ),
-              const SizedBox(height:8),
+              const SizedBox(height: 8),
               const Text(
                 "输入激活码，立即恢复服务时间",
-                style:TextStyle(
-                  fontSize:12,
-                  color:AppConfig.colorTextSub,
-                ),
+                style: TextStyle(fontSize: 13, color: Color(0xFF888888)),
               ),
-              const SizedBox(height:20),
+              const SizedBox(height: 24),
               TextField(
                 controller: controller,
+                style: const TextStyle(fontSize: 15, color: Colors.black87),
                 decoration: InputDecoration(
-                  hintText:"请输入激活码",
-                  filled:true,
-                  fillColor:AppConfig.colorBtnBg,
-                  border:OutlineInputBorder(
-                    borderRadius:BorderRadius.circular(14),
-                    borderSide:BorderSide.none,
+                  hintText: "请输入激活码",
+                  hintStyle: const TextStyle(fontSize: 14, color: Color(0xFFBBBBBB)),
+                  filled: true,
+                  fillColor: const Color(0xFFF7F8FA),
+                  contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
+                  border: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(14),
+                    borderSide: BorderSide.none,
                   ),
                 ),
               ),
-              const SizedBox(height:16),
+              const SizedBox(height: 24),
               SizedBox(
-                width:double.infinity,
-                child:ElevatedButton(
-                  style:ElevatedButton.styleFrom(
-                    backgroundColor:AppConfig.colorPrimary,
-                    foregroundColor:Colors.white,
-                    shape:RoundedRectangleBorder(
-                      borderRadius:BorderRadius.circular(14),
-                    ),
+                width: double.infinity,
+                child: ElevatedButton(
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: AppConfig.colorPrimary,
+                    foregroundColor: Colors.white,
+                    elevation: 0,
+                    padding: const EdgeInsets.symmetric(vertical: 14),
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
                   ),
-                  onPressed:() async {
-                    final code=controller.text.trim();
-                    if(code.isEmpty){
+                  onPressed: () async {
+                    final code = controller.text.trim();
+                    if (code.isEmpty) {
                       _showToast("请输入激活码");
                       return;
                     }
                     Navigator.pop(context);
                     _showToast("正在验证...");
-                    final res=await ApiService.recharge(code);
-                    if(res['code']==200){
-                      setState(()=>_expireText="有效期至: ${res['data']['new_expire_time']}");
+                    final res = await ApiService.recharge(code);
+                    if (res['code'] == 200) {
+                      setState(() => _expireText = "有效期至: ${res['data']['new_expire_time']}");
                     }
-                    _showToast(res['msg']??"处理完成");
+                    _showToast(res['msg'] ?? "处理完成");
                   },
-                  child:const Text("立即激活"),
+                  child: const Text("立即激活", style: TextStyle(fontSize: 15, fontWeight: FontWeight.w600)),
                 ),
               )
             ],
@@ -470,22 +492,218 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
     }
   }
 
+  void _showCheckinDialog() {
+    if (_isDialogActive || _checkedInToday) return;
+    _isDialogActive = true;
+    _isCheckinDialogSubmitting = false;
+
+    showDialog(
+      context: context,
+      builder: (dialogContext) => StatefulBuilder(
+        builder: (dialogContext, setDialogState) {
+          Future<void> handleCheckinTap() async {
+            if (_isCheckinLoading) return;
+            setDialogState(() => _isCheckinDialogSubmitting = true);
+            await _handleCheckin();
+            if (!dialogContext.mounted) return;
+            setDialogState(() => _isCheckinDialogSubmitting = false);
+            if (_checkedInToday) {
+              Future.delayed(const Duration(milliseconds: 400), () {
+                if (dialogContext.mounted) Navigator.pop(dialogContext);
+              });
+            }
+          }
+
+          return Dialog(
+            backgroundColor: Colors.white,
+            elevation: 0,
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
+            child: Padding(
+              padding: const EdgeInsets.fromLTRB(28, 32, 28, 24),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Container(
+                    width: 56, height: 56,
+                    decoration: BoxDecoration(color: AppConfig.colorPrimary.withOpacity(0.08), shape: BoxShape.circle),
+                    child: Icon(Icons.card_giftcard_rounded, size: 26, color: AppConfig.colorPrimary),
+                  ),
+                  const SizedBox(height: 20),
+                  const Text("每日签到", style: TextStyle(fontSize: 18, fontWeight: FontWeight.w700, color: Colors.black87)),
+                  const SizedBox(height: 10),
+                  Text(
+                    _checkinStreak > 0
+                        ? "已连续签到 $_checkinStreak 天\n签到即可获得 $_checkinRewardMinutes 分钟免费时长"
+                        : "签到即可获得 $_checkinRewardMinutes 分钟免费时长",
+                    textAlign: TextAlign.center,
+                    style: const TextStyle(fontSize: 13, color: Color(0xFF666666), height: 1.6),
+                  ),
+                  const SizedBox(height: 28),
+                  SizedBox(
+                    width: double.infinity,
+                    child: ElevatedButton(
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: AppConfig.colorPrimary,
+                        foregroundColor: Colors.white,
+                        elevation: 0,
+                        padding: const EdgeInsets.symmetric(vertical: 14),
+                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+                      ),
+                      onPressed: _isCheckinDialogSubmitting ? null : handleCheckinTap,
+                      child: _isCheckinDialogSubmitting
+                          ? const SizedBox(
+                              width: 18, height: 18,
+                              child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
+                            )
+                          : const Text("立即签到", style: TextStyle(fontSize: 15, fontWeight: FontWeight.w600)),
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+                  TextButton(
+                    onPressed: () => Navigator.pop(dialogContext),
+                    style: TextButton.styleFrom(foregroundColor: const Color(0xFF999999)),
+                    child: const Text("下次再说", style: TextStyle(fontSize: 13)),
+                  ),
+                ],
+              ),
+            ),
+          );
+        },
+      ),
+    ).then((_) => _isDialogActive = false);
+  }
+
+  // ================= 节点选择 =================
+
+  void _showNodePickerSheet() {
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: Colors.white,
+      elevation: 0,
+      isScrollControlled: true, 
+      shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(24))),
+      builder: (sheetContext) {
+        return SafeArea(
+          child: SingleChildScrollView(
+            padding: const EdgeInsets.fromLTRB(24, 12, 24, 16),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Center(
+                  child: Container(
+                    width: 36, height: 4,
+                    margin: const EdgeInsets.only(bottom: 20),
+                    decoration: BoxDecoration(color: const Color(0xFFE0E0E0), borderRadius: BorderRadius.circular(2)),
+                  ),
+                ),
+                const Text("选择线路节点", style: TextStyle(fontSize: 17, fontWeight: FontWeight.w700, color: Colors.black87)),
+                const SizedBox(height: 6),
+                const Text("未连接状态下切换线路即可生效", style: TextStyle(fontSize: 12, color: Color(0xFF888888))),
+                const SizedBox(height: 20),
+                _buildNodeOptionTile(
+                  label: "自动选线",
+                  subtitle: "智能推荐当前延迟最低的节点",
+                  selected: _selectedNodeId == null,
+                  onTap: () => _onSelectNode(null, "自动选线", sheetContext),
+                ),
+                if (_nodeList.isEmpty)
+                  const Padding(
+                    padding: EdgeInsets.symmetric(vertical: 32),
+                    child: Center(child: Text("暂无可选节点", style: TextStyle(fontSize: 13, color: Color(0xFF999999)))),
+                  )
+                else
+                  ..._nodeList.map((node) {
+                    final nodeId = node['node_id'] as String;
+                    final remark = (node['remark'] as String?)?.isNotEmpty == true ? node['remark'] as String : nodeId;
+                    return _buildNodeOptionTile(
+                      label: remark,
+                      subtitle: "当前负载 ${node['load'] ?? 0}%",
+                      selected: _selectedNodeId == nodeId,
+                      onTap: () => _onSelectNode(nodeId, remark, sheetContext),
+                    );
+                  }),
+              ],
+            ),
+          ),
+        );
+      },
+    );
+  }
+
+  Widget _buildNodeOptionTile({
+    required String label,
+    required String subtitle,
+    required bool selected,
+    required VoidCallback onTap,
+  }) {
+    return GestureDetector(
+      onTap: onTap,
+      child: Container(
+        margin: const EdgeInsets.only(bottom: 12),
+        padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 16),
+        decoration: BoxDecoration(
+          color: selected ? AppConfig.colorPrimary.withOpacity(0.06) : const Color(0xFFF7F8FA),
+          borderRadius: BorderRadius.circular(16),
+          border: Border.all(
+            color: selected ? AppConfig.colorPrimary.withOpacity(0.4) : Colors.transparent, 
+            width: 1.5
+          ),
+        ),
+        child: Row(
+          children: [
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    label, 
+                    style: TextStyle(
+                      fontSize: 15, 
+                      fontWeight: selected ? FontWeight.w700 : FontWeight.w500, 
+                      color: selected ? AppConfig.colorPrimary : Colors.black87
+                    )
+                  ),
+                  const SizedBox(height: 4),
+                  Text(subtitle, style: const TextStyle(fontSize: 12, color: Color(0xFF888888))),
+                ],
+              ),
+            ),
+            if (selected) 
+              Icon(Icons.check_circle_rounded, size: 20, color: AppConfig.colorPrimary)
+            else 
+              const Icon(Icons.circle_outlined, size: 20, color: Color(0xFFDDDDDD)),
+          ],
+        ),
+      ),
+    );
+  }
+
+  void _onSelectNode(String? nodeId, String label, BuildContext sheetContext) {
+    if (_vpnState == VpnState.connected || _vpnState == VpnState.connecting) {
+      _showToast("请先断开当前连接再切换节点");
+      return;
+    }
+    setState(() {
+      _selectedNodeId = nodeId;
+      _selectedNodeLabel = label;
+    });
+    _saveSelectedNode(nodeId, label);
+    Navigator.pop(sheetContext);
+  }
+
   // ================= 页面视图构建 =================
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
+      backgroundColor: AppConfig.colorBg,
       body: SafeArea(
-        child: Stack(
+        child: Column(
           children: [
-            Column(
-              children: [
-                _buildTopBar(),
-                Expanded(child: _buildCenterBody()),
-                _buildBottomArea(),
-              ],
-            ),
-            _buildFloatingCheckinButton(),
+            _buildTopBar(),
+            Expanded(child: _buildCenterBody()),
+            _buildBottomArea(),
           ],
         ),
       ),
@@ -494,26 +712,40 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
 
   Widget _buildTopBar() {
     return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 16),
+      padding: const EdgeInsets.fromLTRB(24, 16, 24, 8),
       child: Row(
         children: [
           const Expanded(
-            child: Text(AppConfig.appName, style: TextStyle(fontSize: 22, fontWeight: FontWeight.bold, color: AppConfig.colorPrimary)),
+            child: Text(
+              AppConfig.appName, 
+              style: TextStyle(
+                fontSize: 22, 
+                fontWeight: FontWeight.w800, 
+                color: Colors.black87, 
+                letterSpacing: -0.5
+              )
+            ),
           ),
           GestureDetector(
             onTap: _showNoticeDialog,
             child: Container(
-              margin: const EdgeInsets.only(right: 8),
-              padding: const EdgeInsets.all(8),
-              decoration: BoxDecoration(color: AppConfig.colorBtnBg, shape: BoxShape.circle, border: Border.all(color: AppConfig.colorBorder)),
+              margin: const EdgeInsets.only(right: 12),
+              padding: const EdgeInsets.all(10),
+              decoration: const BoxDecoration(
+                color: Color(0xFFF2F3F5), 
+                shape: BoxShape.circle, 
+              ),
               child: Stack(
                 clipBehavior: Clip.none,
                 children: [
-                  const Icon(Icons.notifications_none, size: 20, color: AppConfig.colorPrimary),
+                  const Icon(Icons.notifications_none_rounded, size: 20, color: Colors.black87),
                   if (_showNoticeDot)
                     Positioned(
-                      right: -2, top: -2,
-                      child: Container(width: 8, height: 8, decoration: const BoxDecoration(color: AppConfig.colorAlert, shape: BoxShape.circle)),
+                      right: -1, top: -1,
+                      child: Container(
+                        width: 7, height: 7, 
+                        decoration: const BoxDecoration(color: Color(0xFFFF4D4F), shape: BoxShape.circle)
+                      ),
                     )
                 ],
               ),
@@ -523,9 +755,15 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
             GestureDetector(
               onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const MarketScreen())),
               child: Container(
-                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-                decoration: BoxDecoration(color: AppConfig.colorBtnBg, borderRadius: BorderRadius.circular(999), border: Border.all(color: AppConfig.colorBorder)),
-                child: const Text("海外应用", style: TextStyle(fontSize: 13, fontWeight: FontWeight.bold, color: AppConfig.colorPrimary)),
+                padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+                decoration: BoxDecoration(
+                  color: const Color(0xFFF2F3F5), 
+                  borderRadius: BorderRadius.circular(999), 
+                ),
+                child: const Text(
+                  "海外应用", 
+                  style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: Colors.black87)
+                ),
               ),
             )
         ],
@@ -535,11 +773,47 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
 
   Widget _buildCenterBody() {
     final isConnected = _vpnState == VpnState.connected;
+    final canPickNode = _vpnState != VpnState.connected && _vpnState != VpnState.connecting;
+
     return Column(
       mainAxisAlignment: MainAxisAlignment.center,
       children: [
+        // 1. 顶部节点切换
+        GestureDetector(
+          onTap: _showNodePickerSheet,
+          child: Container(
+            padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 9),
+            decoration: BoxDecoration(
+              color: const Color(0xFFF2F3F5),
+              borderRadius: BorderRadius.circular(999),
+            ),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Text(
+                  _selectedNodeLabel,
+                  style: TextStyle(
+                    fontSize: 13, 
+                    fontWeight: FontWeight.w600, 
+                    color: canPickNode ? Colors.black87 : const Color(0xFF999999)
+                  ),
+                ),
+                const SizedBox(width: 4),
+                Icon(
+                  Icons.keyboard_arrow_down_rounded, 
+                  size: 16, 
+                  color: canPickNode ? Colors.black87 : const Color(0xFF999999)
+                ),
+              ],
+            ),
+          ),
+        ),
+
+        const SizedBox(height: 48),
+
+        // 2. 核心大环形连接按钮
         SizedBox(
-          width: 184, height: 184,
+          width: 210, height: 210,
           child: Stack(
             alignment: Alignment.center,
             children: [
@@ -548,31 +822,39 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
                   animation: _ringAnimController,
                   builder: (_, __) => Transform.rotate(
                     angle: _ringAnimController.value * 2 * pi,
-                    child: CustomPaint(size: const Size(184, 184), painter: SpinningRingPainter()),
+                    child: CustomPaint(size: const Size(210, 210), painter: SpinningRingPainter()),
                   ),
                 ),
               GestureDetector(
                 onTap: _toggleConnect,
                 child: AnimatedContainer(
-                  duration: const Duration(milliseconds: 200),
-                  width: 164, height: 164,
+                  duration: const Duration(milliseconds: 300),
+                  curve: Curves.easeOutCubic,
+                  width: 176, height: 176,
                   decoration: BoxDecoration(
                     color: isConnected ? AppConfig.colorBg : AppConfig.colorPrimary,
                     shape: BoxShape.circle,
-                    border: isConnected ? Border.all(color: AppConfig.colorPrimary, width: 2) : null,
-                    boxShadow: isConnected ? [] : [BoxShadow(color: Colors.black.withOpacity(0.15), blurRadius: 12, offset: const Offset(0, 6))],
+                    border: Border.all(
+                      color: isConnected ? AppConfig.colorPrimary : AppConfig.colorPrimary.withOpacity(0.8), 
+                      width: isConnected ? 3 : 1
+                    ),
                   ),
                   child: Column(
                     mainAxisAlignment: MainAxisAlignment.center,
                     children: [
                       CustomPaint(
                         size: const Size(34, 34),
-                        painter: PowerIconPainter(color: isConnected ? AppConfig.colorPrimary : AppConfig.colorBg),
+                        painter: PowerIconPainter(color: isConnected ? AppConfig.colorPrimary : Colors.white),
                       ),
-                      const SizedBox(height: 10),
+                      const SizedBox(height: 14),
                       Text(
                         isConnected ? "已连接" : (_vpnState == VpnState.connecting ? "连接中" : "点击连接"),
-                        style: TextStyle(fontSize: 14, fontWeight: FontWeight.bold, color: isConnected ? AppConfig.colorPrimary : AppConfig.colorBg),
+                        style: TextStyle(
+                          fontSize: 15, 
+                          fontWeight: FontWeight.w700, 
+                          color: isConnected ? AppConfig.colorPrimary : Colors.white,
+                          letterSpacing: 1.0,
+                        ),
                       )
                     ],
                   ),
@@ -581,180 +863,119 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
             ],
           ),
         ),
-        const SizedBox(height: 28),
-        if (_statusType == "error") ...[
-          Container(
-            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
-            decoration: BoxDecoration(
-              color: AppConfig.colorBtnBg,
-              borderRadius: BorderRadius.circular(999),
-            ),
-            child: Row(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Container(
-                  width: 6, height: 6,
-                  decoration: const BoxDecoration(color: AppConfig.colorTextSub, shape: BoxShape.circle),
-                ),
-                const SizedBox(width: 8),
-                Text(_statusText, style: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold)),
-              ],
-            ),
-          ),
-          const SizedBox(height: 18),
-        ],
-        GestureDetector(
-          onTap: _openRechargePage,
-          child: Container(
-            padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 10),
-            decoration: BoxDecoration(color: AppConfig.colorPrimary, borderRadius: BorderRadius.circular(999)),
-            child: const Row(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Icon(Icons.bolt, size: 16, color: Colors.white),
-                SizedBox(width: 6),
-                Text("立即充值", style: TextStyle(fontSize: 14, fontWeight: FontWeight.bold, color: Colors.white)),
-              ],
-            ),
-          ),
-        ),
-        const SizedBox(height: 12),
-        if (_expireText.isNotEmpty)
-          Text(_expireText, style: const TextStyle(fontSize: 12, color: AppConfig.colorTextSub)),
-      ],
-    );
-  }
 
-  // ================= 极简胶囊签到按钮 =================
-  Widget _buildFloatingCheckinButton() {
-    final Color primaryColor = AppConfig.colorPrimary;
-    final Color textColorOnDisable = primaryColor.withOpacity(0.6);
+        const SizedBox(height: 48),
 
-    return Positioned(
-      right: 16,
-      top: 100,
-      child: GestureDetector(
-        onTap: _handleCheckin,
-        child: AnimatedContainer(
-          duration: const Duration(milliseconds: 300),
-          curve: Curves.easeInOut,
-          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+        // 3. 【减法优化】：纯到期时间标签，删除了连接状态和圆点
+        Container(
+          padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 10),
           decoration: BoxDecoration(
+            color: const Color(0xFFF7F8FA),
             borderRadius: BorderRadius.circular(999),
-            gradient: _checkedInToday
-                ? null
-                : LinearGradient(
-                    colors: [primaryColor.withOpacity(0.85), primaryColor],
-                    begin: Alignment.topLeft,
-                    end: Alignment.bottomRight,
-                  ),
-            color: _checkedInToday ? AppConfig.colorBtnBg : null,
-            border: _checkedInToday ? Border.all(color: AppConfig.colorBorder) : null,
-            boxShadow: _checkedInToday
-                ? []
-                : [
-                    BoxShadow(
-                      color: primaryColor.withOpacity(0.3),
-                      blurRadius: 8,
-                      offset: const Offset(0, 4),
-                    ),
-                  ],
           ),
-          child: _isCheckinLoading
-              ? SizedBox(
-                  width: 16,
-                  height: 16,
-                  child: CircularProgressIndicator(
-                    strokeWidth: 2,
-                    valueColor: AlwaysStoppedAnimation<Color>(
-                        _checkedInToday ? primaryColor : Colors.white),
-                  ),
-                )
-              : Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Icon(
-                      _checkedInToday
-                          ? Icons.check_circle_outline
-                          : Icons.card_giftcard,
-                      size: 16,
-                      color: _checkedInToday ? textColorOnDisable : Colors.white,
-                    ),
-                    const SizedBox(width: 6),
-                    Text(
-                      _checkedInToday ? "已签到" : "签到",
-                      style: TextStyle(
-                        fontSize: 12,
-                        fontWeight: FontWeight.w600,
-                        color: _checkedInToday ? textColorOnDisable : Colors.white,
-                      ),
-                    ),
-                  ],
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const Icon(Icons.access_time_rounded, size: 15, color: Color(0xFF888888)),
+              const SizedBox(width: 6),
+              Text(
+                _expireText.isNotEmpty 
+                    ? _expireText.replaceFirst("有效期至: ", "服务到期: ") 
+                    : "点击连接获取服务时长",
+                style: const TextStyle(
+                  fontSize: 13, 
+                  fontWeight: FontWeight.w500, 
+                  color: Color(0xFF666666)
                 ),
+              ),
+            ],
+          ),
         ),
-      ),
+      ],
     );
   }
 
   Widget _buildBottomArea() {
     return Padding(
-      padding: const EdgeInsets.fromLTRB(24, 0, 24, 24),
+      padding: const EdgeInsets.fromLTRB(24, 0, 24, 16),
       child: Column(
+        mainAxisSize: MainAxisSize.min,
         children: [
+          Row(
+            children: [
+              Expanded(
+                child: GestureDetector(
+                  onTap: () {
+                    Navigator.push(
+                      context, 
+                      MaterialPageRoute(builder: (_) => const InviteScreen()),
+                    ).then((_) => _initData());
+                  },
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(vertical: 16),
+                    decoration: BoxDecoration(
+                      color: AppConfig.colorPrimary.withOpacity(0.08),
+                      borderRadius: BorderRadius.circular(16),
+                    ),
+                    alignment: Alignment.center,
+                    child: Text(
+                      _inviteBtnText, 
+                      style: TextStyle(
+                        fontSize: 14, 
+                        fontWeight: FontWeight.w600, 
+                        color: AppConfig.colorPrimary,
+                        letterSpacing: 0.3,
+                      ),
+                      maxLines: 1, 
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ),
+                ),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: GestureDetector(
+                  onTap: _openRechargePage,
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(vertical: 16),
+                    decoration: BoxDecoration(
+                      color: AppConfig.colorPrimary,
+                      borderRadius: BorderRadius.circular(16),
+                    ),
+                    alignment: Alignment.center,
+                    child: const Text(
+                      "立即充值", 
+                      style: TextStyle(
+                        fontSize: 14, 
+                        fontWeight: FontWeight.w600, 
+                        color: Colors.white,
+                        letterSpacing: 0.5, 
+                      )
+                    ),
+                  ),
+                ),
+              ),
+            ],
+          ),
+
+          const SizedBox(height: 16),
+
           GestureDetector(
             onTap: _showRechargeDialog,
+            behavior: HitTestBehavior.opaque,
             child: const Padding(
-              padding: EdgeInsets.symmetric(vertical: 10),
+              padding: EdgeInsets.symmetric(vertical: 8),
               child: Row(
                 mainAxisAlignment: MainAxisAlignment.center,
                 children: [
-                  Text("持有激活码？点击立即兑换", style: TextStyle(fontSize: 13, fontWeight: FontWeight.bold, color: AppConfig.colorTextSub)),
-                  Icon(Icons.keyboard_arrow_right, size: 16, color: AppConfig.colorTextMute)
+                  Icon(Icons.key_outlined, size: 14, color: Color(0xFF999999)),
+                  SizedBox(width: 6),
+                  Text("持有激活码？点击直接兑换", style: TextStyle(fontSize: 12, color: Color(0xFF999999))),
+                  Icon(Icons.keyboard_arrow_right_rounded, size: 14, color: Color(0xFF999999)),
                 ],
               ),
             ),
           ),
-          const SizedBox(height: 8),
-          GestureDetector(
-            onTap: () {
-              Navigator.push(
-                context, 
-                MaterialPageRoute(builder: (_) => const InviteScreen()),
-              ).then((_) {
-                _initData(); 
-              });
-            },
-            child: Container(
-              width: double.infinity,
-              padding: const EdgeInsets.symmetric(vertical: 16),
-              decoration: BoxDecoration(
-                color: AppConfig.colorPrimary,
-                borderRadius: BorderRadius.circular(999),
-                boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.15), blurRadius: 8, offset: const Offset(0, 4))]
-              ),
-              alignment: Alignment.center,
-              child: Text(_inviteBtnText, style: const TextStyle(fontSize: 15, fontWeight: FontWeight.bold, color: Colors.white)),
-            ),
-          ),
-          const SizedBox(height: 16),
-          // 测试用：手动分享隧道日志（go_stderr.log），排查"获取节点异常"/
-          // "隧道建立失败"这类问题时用，不影响正常业务流程。
-          GestureDetector(
-            onTap: _handleShareLog,
-            child: const Padding(
-              padding: EdgeInsets.symmetric(vertical: 6),
-              child: Row(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  Icon(Icons.bug_report_outlined, size: 14, color: AppConfig.colorTextMute),
-                  SizedBox(width: 4),
-                  Text("分享日志（测试）", style: TextStyle(fontSize: 12, color: AppConfig.colorTextMute)),
-                ],
-              ),
-            ),
-          ),
-          const SizedBox(height: 8),
-          const Text("设备安全守护中 • V1.0.0", style: TextStyle(fontSize: 11, color: AppConfig.colorTextMute))
         ],
       ),
     );

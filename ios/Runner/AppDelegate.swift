@@ -33,20 +33,9 @@ import UIKit
       }
     }
 
-    let result = super.application(application, didFinishLaunchingWithOptions: launchOptions)
+    // 已经移除了开机自动调用 shareLogIfExists 的代码，现在冷启动不会再自动弹窗了
 
-    // 延迟 1.5 秒，等窗口和根视图控制器准备好之后，
-    // 自动把日志文件通过系统分享面板弹出来——不依赖「文件」App。
-    // 注意：这只是"冷启动时如果已经有日志就顺手弹一次"，
-    // 大多数情况下你会用下面的手动测试按钮（shareLog channel）来触发，
-    // 因为连接失败发生在 App 已经在运行的时候，这个自动触发早就跑过了。
-    DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) {
-      self.shareLogIfExists(auto: true) { success, message in
-        print("[Debug] 启动时自动检查日志: success=\(success) message=\(message)")
-      }
-    }
-
-    return result
+    return super.application(application, didFinishLaunchingWithOptions: launchOptions)
   }
 
   /// 检查 go_stderr.log 是否存在且非空，存在就弹系统分享面板。
