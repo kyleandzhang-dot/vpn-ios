@@ -329,6 +329,99 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
 
   // ================= 业务交互弹窗 =================
 
+  // 【新增】Bug 反馈与诊断日志分享弹窗
+  void _showBugShareDialog() {
+    final logText = "【App诊断日志 / Bug反馈】\n"
+        "应用名称: ${AppConfig.appName}\n"
+        "当前状态: $_vpnState\n"
+        "当前节点: $_selectedNodeLabel ($_selectedNodeId)\n"
+        "服务时间: ${_expireText.isNotEmpty ? _expireText : '未获取'}\n"
+        "连续签到: $_checkinStreak 天\n"
+        "联系客服QQ: $_cfgBuyQQ\n"
+        "系统平台: ${Platform.operatingSystem} (${Platform.operatingSystemVersion})";
+
+    showDialog(
+      context: context,
+      builder: (_) => Dialog(
+        backgroundColor: Colors.white,
+        elevation: 0,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(28, 28, 28, 24),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Row(
+                children: [
+                  Icon(Icons.bug_report_rounded, size: 22, color: Color(0xFFFF4D4F)),
+                  SizedBox(width: 8),
+                  Text(
+                    "Bug 反馈与日志分享",
+                    style: TextStyle(fontSize: 18, fontWeight: FontWeight.w700, color: Colors.black87),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 12),
+              const Text(
+                "遇到连接问题或应用异常？您可以一键复制当前运行的诊断日志并分享给开发者或客服，帮您快速定位排查：",
+                style: TextStyle(fontSize: 13, color: Color(0xFF666666), height: 1.5),
+              ),
+              const SizedBox(height: 16),
+              Container(
+                width: double.infinity,
+                padding: const EdgeInsets.all(14),
+                decoration: BoxDecoration(
+                  color: const Color(0xFFF7F8FA),
+                  borderRadius: BorderRadius.circular(14),
+                ),
+                child: Text(
+                  logText,
+                  style: const TextStyle(fontSize: 12, color: Color(0xFF444444), height: 1.5, fontFamily: 'monospace'),
+                ),
+              ),
+              const SizedBox(height: 24),
+              Row(
+                children: [
+                  Expanded(
+                    child: OutlinedButton(
+                      style: OutlinedButton.styleFrom(
+                        foregroundColor: const Color(0xFF666666),
+                        side: const BorderSide(color: Color(0xFFDDDDDD)),
+                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+                        padding: const EdgeInsets.symmetric(vertical: 14),
+                      ),
+                      onPressed: () => Navigator.pop(context),
+                      child: const Text("关闭", style: TextStyle(fontSize: 15, fontWeight: FontWeight.w600)),
+                    ),
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: ElevatedButton(
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: AppConfig.colorPrimary,
+                        foregroundColor: Colors.white,
+                        elevation: 0,
+                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+                        padding: const EdgeInsets.symmetric(vertical: 14),
+                      ),
+                      onPressed: () {
+                        Clipboard.setData(ClipboardData(text: logText));
+                        Navigator.pop(context);
+                        _showToast("诊断日志已复制，请粘贴分享给客服/测试群");
+                      },
+                      child: const Text("复制并分享", style: TextStyle(fontSize: 15, fontWeight: FontWeight.w600)),
+                    ),
+                  ),
+                ],
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
   void _showNoticeDialog() {
     _isDialogActive = true;
     showDialog(
@@ -724,6 +817,19 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
                 color: Colors.black87, 
                 letterSpacing: -0.5
               )
+            ),
+          ),
+          // 【新增】Bug 反馈与日志分享按钮
+          GestureDetector(
+            onTap: _showBugShareDialog,
+            child: Container(
+              margin: const EdgeInsets.only(right: 12),
+              padding: const EdgeInsets.all(10),
+              decoration: const BoxDecoration(
+                color: Color(0xFFF2F3F5), 
+                shape: BoxShape.circle, 
+              ),
+              child: const Icon(Icons.bug_report_outlined, size: 20, color: Colors.black87),
             ),
           ),
           GestureDetector(
