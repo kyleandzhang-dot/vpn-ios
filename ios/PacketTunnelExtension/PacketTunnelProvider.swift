@@ -26,8 +26,6 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
         }
 
         do {
-            let configJson = try SingBoxConfigBuilder.build(fromNodeJson: nodeJson)
-
             guard let containerURL = FileManager.default.containerURL(forSecurityApplicationGroupIdentifier: appGroup) else {
                 throw NSError(domain: "PacketTunnel", code: 10, userInfo: [NSLocalizedDescriptionKey: "无法获取 App Group 目录"])
             }
@@ -36,9 +34,14 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
 
             // 诊断用：把 stderr 重定向到文件——Go 的 panic / fatal error 默认打印到 stderr，
             // 系统崩溃报告器抓不到这些文字，但这样能把它落盘保存下来。
+            // 关键修复：这一步必须在 SingBoxConfigBuilder.build() 之前执行，否则
+            // build() 内部所有 NSLog（协议识别、生成的完整配置 JSON 等）都会在
+            // 重定向生效之前就打印完了，永远不会出现在 go_stderr.log 里。
             let stderrLogPath = (basePath as NSString).appendingPathComponent("go_stderr.log")
             freopen(stderrLogPath, "a+", stderr)
             NSLog("[Tunnel] stderr 已重定向到: %@ MARKER-V3", stderrLogPath)
+
+            let configJson = try SingBoxConfigBuilder.build(fromNodeJson: nodeJson)
 
             if !PacketTunnelProvider.didSetup {
                 let setupOptions = LibboxSetupOptions()
