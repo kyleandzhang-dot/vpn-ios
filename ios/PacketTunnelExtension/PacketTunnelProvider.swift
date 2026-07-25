@@ -2,6 +2,7 @@
 import NetworkExtension
 import Libbox
 import Darwin
+import Network
 
 class PacketTunnelProvider: NEPacketTunnelProvider {
 
@@ -205,10 +206,19 @@ private class TunnelCommandServerHandler: NSObject, LibboxCommandServerHandlerPr
 
 private class TunnelPlatformInterface: NSObject, LibboxPlatformInterfaceProtocol {
     private weak var provider: PacketTunnelProvider?
+    // 关键修复：用 NWPathMonitor 给 sing-box 提供"当前默认物理接口"信息，
+    // 否则 route.auto_detect_interface 拿不到任何接口，所有出站连接都会报
+    // "no available network interface"。实现方式对齐官方 sing-box-for-apple
+    // 客户端 Library/Network/ExtensionPlatformInterface.swift 的做法。
+    private var nwMonitor: NWPathMonitor?
 
     init(provider: PacketTunnelProvider) {
         self.provider = provider
         super.init()
+    }
+
+    deinit {
+        nwMonitor?.cancel()
     }
 
     func lookupSFTPServer(_ error: NSErrorPointer) -> String {
@@ -229,6 +239,8 @@ private class TunnelPlatformInterface: NSObject, LibboxPlatformInterfaceProtocol
     }
 
     func closeDefaultInterfaceMonitor(_ listener: LibboxInterfaceUpdateListenerProtocol?) throws {
+        nwMonitor?.cancel()
+        nwMonitor = nil
     }
 
     func closeNeighborMonitor(_ listener: LibboxNeighborUpdateListenerProtocol?) throws {
@@ -243,7 +255,31 @@ private class TunnelPlatformInterface: NSObject, LibboxPlatformInterfaceProtocol
     }
 
     func getInterfaces() throws -> LibboxNetworkInterfaceIteratorProtocol {
-        throw NSError(domain: "LibboxPlatformInterface", code: 1, userInfo: [NSLocalizedDescriptionKey: "iOS 平台不需要接口迭代器"])
+        guard let nwMonitor = nwMonitor else {
+            throw NSError(domain: "LibboxPlatformInterface", code: 1, userInfo: [NSLocalizedDescriptionKey: "NWPathMonitor 尚未启动"])
+        }
+        let path = nwMonitor.currentPath
+        if path.status == .unsatisfied {
+            return TunnelNetworkInterfaceIterator([])
+        }
+        var interfaces: [LibboxNetworkInterface] = []
+        for it in path.availableInterfaces {
+            let interface = LibboxNetworkInterface()
+            interface.name = it.name
+            interface.index = Int32(it.index)
+            switch it.type {
+            case .wifi:
+                interface.type = LibboxInterfaceTypeWIFI
+            case .cellular:
+                interface.type = LibboxInterfaceTypeCellular
+            case .wiredEthernet:
+                interface.type = LibboxInterfaceTypeEthernet
+            default:
+                interface.type = LibboxInterfaceTypeOther
+            }
+            interfaces.append(interface)
+        }
+        return TunnelNetworkInterfaceIterator(interfaces)
     }
 
     func includeAllNetworks() -> Bool {
@@ -292,6 +328,39 @@ private class TunnelPlatformInterface: NSObject, LibboxPlatformInterfaceProtocol
     }
 
     func startDefaultInterfaceMonitor(_ listener: LibboxInterfaceUpdateListenerProtocol?) throws {
+        guard let listener = listener else {
+            return
+        }
+        let monitor = NWPathMonitor()
+        nwMonitor = monitor
+        // 用信号量保证：这个方法返回之前，至少已经把第一次的接口状态回调给了
+        // sing-box（跟官方客户端做法一致），避免出现"服务已启动，但还没收到
+        // 任何默认接口信息"的时间窗口。
+        let semaphore = DispatchSemaphore(value: 0)
+        monitor.pathUpdateHandler = { [weak self] path in
+            self?.onUpdateDefaultInterface(listener, path)
+            semaphore.signal()
+            monitor.pathUpdateHandler = { path in
+                self?.onUpdateDefaultInterface(listener, path)
+            }
+        }
+        monitor.start(queue: DispatchQueue.global(qos: .utility))
+        semaphore.wait()
+    }
+
+    private func onUpdateDefaultInterface(_ listener: LibboxInterfaceUpdateListenerProtocol, _ path: Network.NWPath) {
+        guard path.status != .unsatisfied,
+              let defaultInterface = path.availableInterfaces.first
+        else {
+            listener.updateDefaultInterface("", interfaceIndex: -1, isExpensive: false, isConstrained: false)
+            return
+        }
+        listener.updateDefaultInterface(
+            defaultInterface.name,
+            interfaceIndex: Int32(defaultInterface.index),
+            isExpensive: path.isExpensive,
+            isConstrained: path.isConstrained
+        )
     }
 
     func startNeighborMonitor(_ listener: LibboxNeighborUpdateListenerProtocol?) throws {
@@ -319,5 +388,26 @@ private class TunnelPlatformInterface: NSObject, LibboxPlatformInterfaceProtocol
 
     func useProcFS() -> Bool {
         return false
+    }
+}
+
+// MARK: - NetworkInterfaceIterator
+
+/// getInterfaces() 需要返回的迭代器实现，写法对齐官方 sing-box-for-apple 客户端。
+private class TunnelNetworkInterfaceIterator: NSObject, LibboxNetworkInterfaceIteratorProtocol {
+    private var iterator: IndexingIterator<[LibboxNetworkInterface]>
+    private var nextValue: LibboxNetworkInterface?
+
+    init(_ array: [LibboxNetworkInterface]) {
+        iterator = array.makeIterator()
+    }
+
+    func hasNext() -> Bool {
+        nextValue = iterator.next()
+        return nextValue != nil
+    }
+
+    func next() -> LibboxNetworkInterface? {
+        nextValue
     }
 }
