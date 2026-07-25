@@ -19,6 +19,8 @@
 		7F0D3A393013AA0000F36CEB /* libresolv.tbd in Frameworks */ = {isa = PBXBuildFile; fileRef = 7F0D3A383013AA0000F36CEB /* libresolv.tbd */; };
 		7F0D3A3B3013AA1000F36CEB /* UIKit.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 7F0D3A3A3013AA1000F36CEB /* UIKit.framework */; };
 		7F0D3A3E3013AE5500F36CEB /* VpnTunnelPlugin.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7F0D3A3C3013AC9B00F36CEB /* VpnTunnelPlugin.swift */; };
+		7F0D3A56301559F300F36CEB /* DeviceIdManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7F0D3A55301559F300F36CEB /* DeviceIdManager.swift */; };
+		7F0D3A57301559F300F36CEB /* DeviceIdManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7F0D3A55301559F300F36CEB /* DeviceIdManager.swift */; };
 		7F69A33A30112A9400F219F7 /* NetworkExtension.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 7F69A3253011279500F219F7 /* NetworkExtension.framework */; };
 		7F69A34230112A9400F219F7 /* PacketTunnelExtension.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = 7F69A33930112A9400F219F7 /* PacketTunnelExtension.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
 		94728851B3C6E300A0F1DA8A /* Pods_RunnerTests.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 969F9266420DEC5619A80A25 /* Pods_RunnerTests.framework */; };
@@ -85,6 +87,7 @@
 		7F0D3A383013AA0000F36CEB /* libresolv.tbd */ = {isa = PBXFileReference; lastKnownFileType = "sourcecode.text-based-dylib-definition"; name = libresolv.tbd; path = usr/lib/libresolv.tbd; sourceTree = SDKROOT; };
 		7F0D3A3A3013AA1000F36CEB /* UIKit.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = UIKit.framework; path = System/Library/Frameworks/UIKit.framework; sourceTree = SDKROOT; };
 		7F0D3A3C3013AC9B00F36CEB /* VpnTunnelPlugin.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VpnTunnelPlugin.swift; sourceTree = "<group>"; };
+		7F0D3A55301559F300F36CEB /* DeviceIdManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DeviceIdManager.swift; sourceTree = "<group>"; };
 		7F69A31F301126FB00F219F7 /* Runner.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = Runner.entitlements; sourceTree = "<group>"; };
 		7F69A3253011279500F219F7 /* NetworkExtension.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = NetworkExtension.framework; path = System/Library/Frameworks/NetworkExtension.framework; sourceTree = SDKROOT; };
 		7F69A33930112A9400F219F7 /* PacketTunnelExtension.appex */ = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; includeInIndex = 0; path = PacketTunnelExtension.appex; sourceTree = BUILT_PRODUCTS_DIR; };
@@ -187,6 +190,7 @@
 			isa = PBXGroup;
 			children = (
 				7F0D3A3C3013AC9B00F36CEB /* VpnTunnelPlugin.swift */,
+				7F0D3A55301559F300F36CEB /* DeviceIdManager.swift */,
 				9740EEB11CF90186004384FC /* Flutter */,
 				97C146F01CF9000F007C117D /* Runner */,
 				7F69A33B30112A9400F219F7 /* PacketTunnelExtension */,
@@ -515,6 +519,7 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				7F0D3A56301559F300F36CEB /* DeviceIdManager.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -522,6 +527,7 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				7F0D3A57301559F300F36CEB /* DeviceIdManager.swift in Sources */,
 				74858FAF1ED2DC5600515810 /* AppDelegate.swift in Sources */,
 				1498D2341E8E89220040F4C2 /* GeneratedPluginRegistrant.m in Sources */,
 				7F0D3A3E3013AE5500F36CEB /* VpnTunnelPlugin.swift in Sources */,
