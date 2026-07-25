@@ -214,30 +214,65 @@ enum SingBoxConfigBuilder {
     }
 
     // --- TLS / Reality 处理 ---
+    // 关键修复：这个后端的节点 JSON 把 Reality 相关字段放在嵌套的
+    // "reality": {publicKey, shortId, serverName, fingerprint} 对象里，
+    // 而不是老式扁平字段(pbk/sid/sni)。之前只找顶层字段，导致：
+    // 1) SNI 拿不到 serverName，退化成用服务器 IP 当 SNI —— Reality 服务端一看
+    //    SNI 不对就直接判定异常连接。
+    // 2) publicKey/shortId 拿不到，最终配置里根本没有 "reality" 字段 ——
+    //    客户端等于在用普通 TLS 去敲一个 Reality 端口，握手必然失败。
+    // 这里统一用 extractRealityInfo 同时兼容嵌套对象和老式扁平字段。
+    private static func extractRealityInfo(_ node: [String: Any]) -> (serverName: String?, publicKey: String?, shortId: String?, fingerprint: String?) {
+        if let realityObj = node["reality"] as? [String: Any] {
+            return (
+                extractString(realityObj, keys: ["serverName", "server_name", "sni"]),
+                extractString(realityObj, keys: ["publicKey", "public_key", "pbk"]),
+                extractString(realityObj, keys: ["shortId", "short_id", "sid"]),
+                extractString(realityObj, keys: ["fingerprint", "fp"])
+            )
+        }
+        // 兼容老式扁平字段（其他来源的节点可能是这种格式）
+        return (
+            extractString(node, keys: ["sni", "host", "peer"]),
+            extractString(node, keys: ["pbk", "public_key"]),
+            extractString(node, keys: ["sid", "short_id"]),
+            extractString(node, keys: ["fp", "fingerprint"])
+        )
+    }
+
     private static func appendTLS(to outbound: inout [String: Any], node: [String: Any], defaultHost: String, forceTLS: Bool = false) {
         let tlsStr = extractString(node, keys: ["tls", "security"]) ?? ""
-        let isTls = forceTLS || tlsStr == "tls" || tlsStr == "reality" || node["sni"] != nil
+        let realityInfo = extractRealityInfo(node)
+        let isReality = tlsStr == "reality" || realityInfo.publicKey != nil
+        let isTls = forceTLS || tlsStr == "tls" || isReality || node["sni"] != nil
 
-        if isTls {
-            let sni = extractString(node, keys: ["sni", "host", "peer"]) ?? defaultHost
-            var tlsConfig: [String: Any] = [
+        guard isTls else { return }
+
+        let sni = realityInfo.serverName ?? defaultHost
+        var tlsConfig: [String: Any] = [
+            "enabled": true,
+            "server_name": sni,
+            "insecure": (node["allowInsecure"] as? Bool) ?? false
+        ]
+
+        if isReality, let pbk = realityInfo.publicKey, let sid = realityInfo.shortId {
+            tlsConfig["reality"] = [
                 "enabled": true,
-                "server_name": sni,
-                "insecure": (node["allowInsecure"] as? Bool) ?? false
+                "public_key": pbk,
+                "short_id": sid
             ]
-
-            if tlsStr == "reality" || node["pbk"] != nil {
-                if let pbk = extractString(node, keys: ["pbk", "public_key"]),
-                   let sid = extractString(node, keys: ["sid", "short_id"]) {
-                    tlsConfig["reality"] = [
-                        "enabled": true,
-                        "public_key": pbk,
-                        "short_id": sid
-                    ]
-                }
-            }
-            outbound["tls"] = tlsConfig
+            // Reality 强依赖客户端 TLS 指纹跟正常浏览器一致（否则容易被识别），
+            // 用节点给的 fingerprint(如 "chrome")；没给就默认用 chrome。
+            tlsConfig["utls"] = [
+                "enabled": true,
+                "fingerprint": realityInfo.fingerprint ?? "chrome"
+            ]
+        } else if tlsStr == "reality" {
+            let msg = "协议标记为 reality，但节点里缺少 publicKey/shortId，Reality 握手必然失败"
+            NSLog("[SingBoxBuilder 致命错误] %@", msg)
         }
+
+        outbound["tls"] = tlsConfig
     }
 
     // --- 智能推测协议 ---
