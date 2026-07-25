@@ -25,6 +25,9 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
   StreamSubscription? _vpnSubscription;
   late AnimationController _ringAnimController;
 
+  // 【对接 iOS 原生】AppDelegate 中注册的独立日志分享通道
+  static const _logChannel = MethodChannel('com.example.vpn_all/log');
+
   // 【减法】：删除了 _statusText 和 _statusType，只保留核心到期时间
   String _expireText = "";
   String _inviteBtnText = "免费领时长";
@@ -327,99 +330,24 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
     );
   }
 
-  // ================= 业务交互弹窗 =================
+  // ================= 业务交互调用 =================
 
-  // 【新增】Bug 反馈与诊断日志分享弹窗
-  void _showBugShareDialog() {
-    final logText = "【App诊断日志 / Bug反馈】\n"
-        "应用名称: ${AppConfig.appName}\n"
-        "当前状态: $_vpnState\n"
-        "当前节点: $_selectedNodeLabel ($_selectedNodeId)\n"
-        "服务时间: ${_expireText.isNotEmpty ? _expireText : '未获取'}\n"
-        "连续签到: $_checkinStreak 天\n"
-        "联系客服QQ: $_cfgBuyQQ\n"
-        "系统平台: ${Platform.operatingSystem} (${Platform.operatingSystemVersion})";
-
-    showDialog(
-      context: context,
-      builder: (_) => Dialog(
-        backgroundColor: Colors.white,
-        elevation: 0,
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
-        child: Padding(
-          padding: const EdgeInsets.fromLTRB(28, 28, 28, 24),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              const Row(
-                children: [
-                  Icon(Icons.bug_report_rounded, size: 22, color: Color(0xFFFF4D4F)),
-                  SizedBox(width: 8),
-                  Text(
-                    "Bug 反馈与日志分享",
-                    style: TextStyle(fontSize: 18, fontWeight: FontWeight.w700, color: Colors.black87),
-                  ),
-                ],
-              ),
-              const SizedBox(height: 12),
-              const Text(
-                "遇到连接问题或应用异常？您可以一键复制当前运行的诊断日志并分享给开发者或客服，帮您快速定位排查：",
-                style: TextStyle(fontSize: 13, color: Color(0xFF666666), height: 1.5),
-              ),
-              const SizedBox(height: 16),
-              Container(
-                width: double.infinity,
-                padding: const EdgeInsets.all(14),
-                decoration: BoxDecoration(
-                  color: const Color(0xFFF7F8FA),
-                  borderRadius: BorderRadius.circular(14),
-                ),
-                child: Text(
-                  logText,
-                  style: const TextStyle(fontSize: 12, color: Color(0xFF444444), height: 1.5, fontFamily: 'monospace'),
-                ),
-              ),
-              const SizedBox(height: 24),
-              Row(
-                children: [
-                  Expanded(
-                    child: OutlinedButton(
-                      style: OutlinedButton.styleFrom(
-                        foregroundColor: const Color(0xFF666666),
-                        side: const BorderSide(color: Color(0xFFDDDDDD)),
-                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
-                        padding: const EdgeInsets.symmetric(vertical: 14),
-                      ),
-                      onPressed: () => Navigator.pop(context),
-                      child: const Text("关闭", style: TextStyle(fontSize: 15, fontWeight: FontWeight.w600)),
-                    ),
-                  ),
-                  const SizedBox(width: 12),
-                  Expanded(
-                    child: ElevatedButton(
-                      style: ElevatedButton.styleFrom(
-                        backgroundColor: AppConfig.colorPrimary,
-                        foregroundColor: Colors.white,
-                        elevation: 0,
-                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
-                        padding: const EdgeInsets.symmetric(vertical: 14),
-                      ),
-                      onPressed: () {
-                        Clipboard.setData(ClipboardData(text: logText));
-                        Navigator.pop(context);
-                        _showToast("诊断日志已复制，请粘贴分享给客服/测试群");
-                      },
-                      child: const Text("复制并分享", style: TextStyle(fontSize: 15, fontWeight: FontWeight.w600)),
-                    ),
-                  ),
-                ],
-              ),
-            ],
-          ),
-        ),
-      ),
-    );
+  // 【对接原生】调用 iOS 端 AppDelegate 中的 shareLog 导出 go_stderr.log 日志
+  Future<void> _shareNativeLog() async {
+    try {
+      final Map<dynamic, dynamic>? res = await _logChannel.invokeMethod('shareLog');
+      if (res != null) {
+        final bool success = res['success'] == true;
+        final String message = res['message']?.toString() ?? (success ? "已弹出日志分享面板" : "调起分享失败");
+        _showToast(message);
+      }
+    } on PlatformException catch (e) {
+      debugPrint("调起原生日志分享异常: ${e.message}");
+      _showToast("分享失败: ${e.message ?? '未知平台错误'}");
+    } catch (e) {
+      debugPrint("调起原生日志分享出错: $e");
+      _showToast("暂不支持该设备的日志分享");
+    }
   }
 
   void _showNoticeDialog() {
@@ -819,9 +747,9 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
               )
             ),
           ),
-          // 【新增】Bug 反馈与日志分享按钮
+          // 【真正对接原生的按钮】调用 _shareNativeLog 调起 iOS 系统的 UIActivityViewController 分享日志
           GestureDetector(
-            onTap: _showBugShareDialog,
+            onTap: _shareNativeLog,
             child: Container(
               margin: const EdgeInsets.only(right: 12),
               padding: const EdgeInsets.all(10),
@@ -1084,6 +1012,6 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
           ),
         ],
       ),
-    );//
+    );
   }
 }
