@@ -61,7 +61,7 @@ enum SingBoxConfigBuilder {
             "dns": [
                 "servers": [
                     ["tag": "dns-remote", "type": "udp", "server": "1.1.1.1", "detour": "proxy"],
-                    ["tag": "dns-local", "type": "udp", "server": "223.5.5.5", "detour": "direct"]
+                    ["tag": "dns-local", "type": "udp", "server": "223.5.5.5"]
                 ],
                 // 关键修复：如果代理服务器地址填的是域名，出站(outbound)自己去连接
                 // 服务器之前得先解析这个域名。如果这个解析也走 dns-remote(经代理)，
