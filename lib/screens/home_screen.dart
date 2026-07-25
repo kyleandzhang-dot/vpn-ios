@@ -282,6 +282,16 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
     }
   }
 
+  // 手动触发日志分享（测试按钮用）。因为"获取节点异常"这种问题跟隧道
+  // 建立无关，如果想看隧道那边（PacketTunnelProvider/sing-box）的日志，
+  // 得先真的尝试连接一次（哪怕失败），再点这个按钮把 go_stderr.log 分享出来。
+  Future<void> _handleShareLog() async {
+    final result = await VpnBridge.shareLog();
+    final success = result['success'] == true;
+    final message = result['message']?.toString() ?? (success ? "已分享" : "分享失败");
+    _showToast(message);
+  }
+
   void _showToast(String msg) {
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(content: Text(msg), duration: const Duration(seconds: 2))
@@ -727,6 +737,23 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
             ),
           ),
           const SizedBox(height: 16),
+          // 测试用：手动分享隧道日志（go_stderr.log），排查"获取节点异常"/
+          // "隧道建立失败"这类问题时用，不影响正常业务流程。
+          GestureDetector(
+            onTap: _handleShareLog,
+            child: const Padding(
+              padding: EdgeInsets.symmetric(vertical: 6),
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  Icon(Icons.bug_report_outlined, size: 14, color: AppConfig.colorTextMute),
+                  SizedBox(width: 4),
+                  Text("分享日志（测试）", style: TextStyle(fontSize: 12, color: AppConfig.colorTextMute)),
+                ],
+              ),
+            ),
+          ),
+          const SizedBox(height: 8),
           const Text("设备安全守护中 • V1.0.0", style: TextStyle(fontSize: 11, color: AppConfig.colorTextMute))
         ],
       ),

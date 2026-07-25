@@ -3,6 +3,11 @@ import UIKit
 
 @main
 @objc class AppDelegate: FlutterAppDelegate {
+
+  // 单独开一个 channel 给"手动分享日志"用，跟 VpnTunnelPlugin 用的
+  // 'com.example.vpn_all/vpn' channel 完全独立，不会互相覆盖 handler。
+  private let logChannelName = "com.example.vpn_all/log"
+
   override func application(
     _ application: UIApplication,
     didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]?
@@ -11,35 +16,68 @@ import UIKit
 
     VpnTunnelPlugin.register(with: self.registrar(forPlugin: "VpnTunnelPlugin")!)
 
+    // 注册"手动分享日志" MethodChannel，供 Flutter 侧的测试按钮调用。
+    if let logRegistrar = self.registrar(forPlugin: "LogSharePlugin") {
+      let logChannel = FlutterMethodChannel(
+        name: logChannelName,
+        binaryMessenger: logRegistrar.messenger()
+      )
+      logChannel.setMethodCallHandler { [weak self] call, result in
+        guard call.method == "shareLog" else {
+          result(FlutterMethodNotImplemented)
+          return
+        }
+        self?.shareLogIfExists(auto: false) { success, message in
+          result(["success": success, "message": message])
+        }
+      }
+    }
+
     let result = super.application(application, didFinishLaunchingWithOptions: launchOptions)
 
     // 延迟 1.5 秒，等窗口和根视图控制器准备好之后，
     // 自动把日志文件通过系统分享面板弹出来——不依赖「文件」App。
+    // 注意：这只是"冷启动时如果已经有日志就顺手弹一次"，
+    // 大多数情况下你会用下面的手动测试按钮（shareLog channel）来触发，
+    // 因为连接失败发生在 App 已经在运行的时候，这个自动触发早就跑过了。
     DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) {
-      self.shareLogIfExists()
+      self.shareLogIfExists(auto: true) { success, message in
+        print("[Debug] 启动时自动检查日志: success=\(success) message=\(message)")
+      }
     }
 
     return result
   }
 
-  private func shareLogIfExists() {
+  /// 检查 go_stderr.log 是否存在且非空，存在就弹系统分享面板。
+  /// - Parameters:
+  ///   - auto: true 表示是启动时自动触发的（找不到/为空时只打印日志，不打扰用户）；
+  ///           false 表示是用户手动点了测试按钮触发的（找不到/为空时也要通过 completion 告诉调用方，方便在 UI 上提示用户）。
+  ///   - completion: (success, message)，用于反馈给 Flutter 侧弹 toast。
+  private func shareLogIfExists(auto: Bool, completion: @escaping (Bool, String) -> Void) {
     let appGroup = "group.com.miaolian.myvpn" // 跟 Extension 里用的保持一致
 
     guard let containerURL = FileManager.default.containerURL(forSecurityApplicationGroupIdentifier: appGroup) else {
-      print("[Debug] 拿不到 App Group 容器路径")
+      let msg = "拿不到 App Group 容器路径"
+      print("[Debug] \(msg)")
+      completion(false, msg)
       return
     }
     let sourceURL = containerURL.appendingPathComponent("libbox/go_stderr.log")
 
     guard FileManager.default.fileExists(atPath: sourceURL.path) else {
-      print("[Debug] 日志文件不存在: \(sourceURL.path)")
+      let msg = "日志文件不存在，还没有产生过连接日志"
+      print("[Debug] \(msg): \(sourceURL.path)")
+      completion(false, msg)
       return
     }
 
     // 判断文件是不是空的，空文件就不弹了
     if let attrs = try? FileManager.default.attributesOfItem(atPath: sourceURL.path),
        let size = attrs[.size] as? Int, size == 0 {
-      print("[Debug] 日志文件是空的，跳过分享")
+      let msg = "日志文件是空的"
+      print("[Debug] \(msg)，跳过分享")
+      completion(false, msg)
       return
     }
 
@@ -47,7 +85,9 @@ import UIKit
       .compactMap({ $0 as? UIWindowScene })
       .flatMap({ $0.windows })
       .first(where: { $0.isKeyWindow })?.rootViewController else {
-      print("[Debug] 找不到 rootViewController，无法弹分享面板")
+      let msg = "找不到 rootViewController，无法弹分享面板"
+      print("[Debug] \(msg)")
+      completion(false, msg)
       return
     }
 
@@ -66,5 +106,6 @@ import UIKit
       topVC = presented
     }
     topVC.present(activityVC, animated: true)
+    completion(true, "已弹出日志分享面板")
   }
 }
