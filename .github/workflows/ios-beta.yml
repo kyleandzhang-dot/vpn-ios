@@ -177,7 +177,18 @@ jobs:
             echo "✅ [$FW_PATH] 已成功锁死为 Libbox！"
           done
 
-      - name: Run fastlane beta
+      - name: Run fastlane adhoc (Ad Hoc签名，用于R2/Diawi分发，不走TestFlight)
+        working-directory: ios
+        env:
+          APP_STORE_CONNECT_API_KEY_ID: ${{ secrets.APP_STORE_CONNECT_API_KEY_ID }}
+          APP_STORE_CONNECT_API_ISSUER_ID: ${{ secrets.APP_STORE_CONNECT_API_ISSUER_ID }}
+          APP_STORE_CONNECT_API_KEY_CONTENT: ${{ secrets.APP_STORE_CONNECT_API_KEY_CONTENT }}
+          MATCH_PASSWORD: ${{ secrets.MATCH_PASSWORD }}
+          MATCH_GIT_BASIC_AUTHORIZATION: ${{ secrets.MATCH_GIT_BASIC_AUTHORIZATION }}
+        run: fastlane adhoc
+
+      - name: Run fastlane beta (可选，由仓库Variable PUSH_TO_TESTFLIGHT 控制，推送TestFlight)
+        if: ${{ vars.PUSH_TO_TESTFLIGHT == 'true' }}
         working-directory: ios
         env:
           APP_STORE_CONNECT_API_KEY_ID: ${{ secrets.APP_STORE_CONNECT_API_KEY_ID }}
@@ -186,3 +197,82 @@ jobs:
           MATCH_PASSWORD: ${{ secrets.MATCH_PASSWORD }}
           MATCH_GIT_BASIC_AUTHORIZATION: ${{ secrets.MATCH_GIT_BASIC_AUTHORIZATION }}
         run: fastlane beta
+
+      - name: Get build info
+        id: build_info
+        run: |
+          BUILD_TIME=$(date +%Y%m%d-%H%M%S)
+          echo "build_time=${BUILD_TIME}" >> "$GITHUB_OUTPUT"
+          echo "ipa_name=MiaoLianVpn-${BUILD_TIME}.ipa" >> "$GITHUB_OUTPUT"
+
+      - name: Generate manifest.plist
+        run: |
+          cat <<EOF > manifest.plist
+          <?xml version="1.0" encoding="UTF-8"?>
+          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+          <plist version="1.0">
+          <dict>
+              <key>items</key>
+              <array>
+                  <dict>
+                      <key>assets</key>
+                      <array>
+                          <dict>
+                              <key>kind</key>
+                              <string>software-package</string>
+                              <key>url</key>
+                              <string>${{ secrets.R2_PUBLIC_URL }}/${{ steps.build_info.outputs.ipa_name }}</string>
+                          </dict>
+                      </array>
+                      <key>metadata</key>
+                      <dict>
+                          <key>bundle-identifier</key>
+                          <string>com.miaolian.myvpn</string>
+                          <key>bundle-version</key>
+                          <string>${{ github.run_number }}</string>
+                          <key>kind</key>
+                          <string>software</string>
+                          <key>title</key>
+                          <string>秒连VPN</string>
+                      </dict>
+                  </dict>
+              </array>
+          </dict>
+          </plist>
+          EOF
+
+      - name: Install AWS CLI (for R2 upload, R2兼容S3协议)
+        run: |
+          if ! command -v aws &> /dev/null; then
+            pip3 install awscli --break-system-packages 2>/dev/null || pip3 install awscli
+          fi
+
+      - name: Upload IPA + manifest to R2
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+        run: |
+          ENDPOINT="https://${{ secrets.R2_ACCOUNT_ID }}.r2.cloudflarestorage.com"
+
+          aws s3 cp ios/Runner.ipa \
+            "s3://${{ secrets.R2_BUCKET }}/${{ steps.build_info.outputs.ipa_name }}" \
+            --endpoint-url "$ENDPOINT" \
+            --content-type "application/octet-stream"
+
+          aws s3 cp manifest.plist \
+            "s3://${{ secrets.R2_BUCKET }}/manifest-${{ steps.build_info.outputs.build_time }}.plist" \
+            --endpoint-url "$ENDPOINT" \
+            --content-type "application/xml"
+
+      - name: Print install link
+        run: |
+          MANIFEST_URL="${{ secrets.R2_PUBLIC_URL }}/manifest-${{ steps.build_info.outputs.build_time }}.plist"
+          INSTALL_LINK="itms-services://?action=download-manifest&url=${MANIFEST_URL}"
+          echo "=================================================="
+          echo "📱 手机Safari打开下面链接直接安装:"
+          echo "$INSTALL_LINK"
+          echo "=================================================="
+          echo "### 📱 安装链接" >> "$GITHUB_STEP_SUMMARY"
+          echo "\`$INSTALL_LINK\`" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "[点击安装](${INSTALL_LINK})" >> "$GITHUB_STEP_SUMMARY"
