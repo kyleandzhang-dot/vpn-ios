@@ -10,7 +10,7 @@ enum SingBoxConfigBuilder {
         var errorUserInfo: [String : Any] { [NSLocalizedDescriptionKey: message] }
     }
 
-    static func build(fromNodeJson nodeJson: String) throws -> String {
+    static func build(fromNodeJson nodeJson: String, logFilePath: String? = nil) throws -> String {
         NSLog("[SingBoxBuilder] 开始解析节点配置，字符长度: %d", nodeJson.count)
 
         guard let data = nodeJson.data(using: .utf8),
@@ -56,8 +56,17 @@ enum SingBoxConfigBuilder {
         }
 
         // 3. 组装标准 config.json
+        // 关键修复：之前只设置了 "level":"info"，sing-box 默认把这部分结构化运行日志
+        // 写去 stdout（不是 stderr），而我们只重定向了 stderr，导致这些日志一直
+        // 进了"黑洞"。现在显式指定 "output" 路径，让 sing-box 直接写文件，
+        // 不再依赖猜测它到底写去 stdout 还是 stderr。
+        var logConfig: [String: Any] = ["level": "info", "timestamp": true]
+        if let logFilePath = logFilePath {
+            logConfig["output"] = logFilePath
+        }
+
         let config: [String: Any] = [
-            "log": ["level": "info"],
+            "log": logConfig,
             "dns": [
                 "servers": [
                     ["tag": "dns-remote", "type": "udp", "server": "1.1.1.1", "detour": "proxy"],

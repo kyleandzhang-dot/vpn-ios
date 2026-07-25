@@ -41,7 +41,7 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
             freopen(stderrLogPath, "a+", stderr)
             NSLog("[Tunnel] stderr 已重定向到: %@ MARKER-V3", stderrLogPath)
 
-            let configJson = try SingBoxConfigBuilder.build(fromNodeJson: nodeJson)
+            let configJson = try SingBoxConfigBuilder.build(fromNodeJson: nodeJson, logFilePath: stderrLogPath)
 
             if !PacketTunnelProvider.didSetup {
                 let setupOptions = LibboxSetupOptions()
