@@ -16,7 +16,7 @@ class DeviceIdManager {
     // 2. PacketTunnelExtension target 同样加一遍 Keychain Sharing，组名填一模一样的
     // 3. 如果不设置这个，主 App 和 Extension 会各自生成一份不同的 UUID，
     //    Extension 里的心跳检测用的 device_id 会跟主 App 登录/付费用的 device_id 对不上
-    private static let keychainAccessGroup = "TEAMID.com.example.vpnAll.shared"
+    private static let keychainAccessGroup = "85F7XUQB6K.group.com.miaolian.myvpn"
 
     /// 获取设备的永久唯一 ID（主 App 和 Extension 共用同一份）
     static func getDeviceId() -> String {
