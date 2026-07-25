@@ -61,7 +61,7 @@ enum SingBoxConfigBuilder {
             "dns": [
                 "servers": [
                     ["tag": "dns-remote", "type": "udp", "server": "1.1.1.1", "detour": "proxy"],
-                    ["tag": "dns-local", "type": "udp", "server": "223.5.5.5", "detour": "direct"]
+                    ["tag": "dns-local", "type": "udp", "server": "223.5.5.5"]
                 ]
             ],
             "inbounds": [
