@@ -100,7 +100,7 @@ enum SingBoxConfigBuilder {
         guard let jsonString = String(data: jsonData, encoding: .utf8) else {
             throw BuildError(message: "序列化 sing-box JSON 配置失败")
         }
-        NSLog("[SingBoxBuilder] 成功生成 sing-box 配置 JSON！")
+        NSLog("[SingBoxBuilder] 成功生成 sing-box 配置 JSON！完整内容如下，方便核对 tls/reality 字段是否正确:\n%@", jsonString)
         return jsonString
     }
 
