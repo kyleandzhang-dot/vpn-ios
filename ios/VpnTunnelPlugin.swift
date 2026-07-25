@@ -9,8 +9,8 @@ public class VpnTunnelPlugin: NSObject, FlutterPlugin, FlutterStreamHandler {
 
     private var eventSink: FlutterEventSink?
     private var manager: NETunnelProviderManager?
-    private let appGroup = "group.com.example.vpnAll" // 要跟 Extension 里的一致
-    private let providerBundleId = "com.example.vpnAll.PacketTunnel" // 要跟 Extension target 的 Bundle Identifier 一致
+    private let appGroup = "group.com.miaolian.myvpn" // 跟 AppDelegate / Extension 里保持一致
+    private let providerBundleId = "com.miaolian.myvpn.PacketTunnelExtension" // 必须跟 Extension target 的真实 Bundle Identifier 完全一致
 
     public static func register(with registrar: FlutterPluginRegistrar) {
         let instance = VpnTunnelPlugin()
