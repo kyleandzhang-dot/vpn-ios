@@ -698,6 +698,7 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
                     color: Colors.black87,
                   ),
                 ),
+                
                 const SizedBox(height: 20),
                 _buildNodeOptionTile(
                   label: "自动选线",
