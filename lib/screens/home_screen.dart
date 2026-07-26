@@ -668,6 +668,15 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
   // ================= 节点选择 =================
 
   void _showNodePickerSheet() {
+    // 之前这里直接用 _initData 时加载的那份 _nodeList，节点可能在后台
+    // 被下线/新增，缓存太久容易选到已经不可用的线路。改成每次点开都
+    // 重新从后端拉一次最新列表，用 StatefulBuilder 管理弹窗内部的 loading
+    // 状态（不能直接用外层 setState，因为 bottom sheet 的 builder 不会
+    // 随外层 State 重建），拉完再把结果同步回 _nodeList，下次打开先展示
+    // 这次的结果、同时仍然会再拉一次最新的。
+    bool isLoadingNodes = true;
+    bool hasStartedFetch = false;
+
     showModalBottomSheet(
       context: context,
       backgroundColor: Colors.white,
@@ -675,56 +684,83 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
       isScrollControlled: true, 
       shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(24))),
       builder: (sheetContext) {
-        return SafeArea(
-          child: SingleChildScrollView(
-            padding: const EdgeInsets.fromLTRB(24, 12, 24, 16),
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Center(
-                  child: Container(
-                    width: 36, height: 4,
-                    margin: const EdgeInsets.only(bottom: 20),
-                    decoration: BoxDecoration(color: const Color(0xFFE0E0E0), borderRadius: BorderRadius.circular(2)),
-                  ),
+        return StatefulBuilder(
+          builder: (context, setSheetState) {
+            if (!hasStartedFetch) {
+              hasStartedFetch = true;
+              // build 过程中不能直接 setState，用 microtask 延后到下一帧执行
+              Future.microtask(() async {
+                final data = await ApiService.fetchNodes();
+                if (data['code'] == 200 && data['data'] != null) {
+                  final freshList = List<Map<String, dynamic>>.from(data['data']);
+                  if (mounted) setState(() => _nodeList = freshList); // 同步回外层，下次打开先展示这次结果
+                }
+                // 拉取失败就保留原来的 _nodeList 兜底展示，不清空
+                setSheetState(() => isLoadingNodes = false);
+              });
+            }
+
+            return SafeArea(
+              child: SingleChildScrollView(
+                padding: const EdgeInsets.fromLTRB(24, 12, 24, 16),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Center(
+                      child: Container(
+                        width: 36, height: 4,
+                        margin: const EdgeInsets.only(bottom: 20),
+                        decoration: BoxDecoration(color: const Color(0xFFE0E0E0), borderRadius: BorderRadius.circular(2)),
+                      ),
+                    ),
+                    // 【改造】：极简标题，移除了多余的说明语
+                    const Text(
+                      "选择线路",
+                      style: TextStyle(
+                        fontSize: 18,
+                        fontWeight: FontWeight.w700,
+                        color: Colors.black87,
+                      ),
+                    ),
+                    const SizedBox(height: 20),
+                    _buildNodeOptionTile(
+                      label: "自动选线",
+                      subtitle: "",
+                      selected: _selectedNodeId == null,
+                      onTap: () => _onSelectNode(null, "自动选线", sheetContext),
+                    ),
+                    if (isLoadingNodes)
+                      const Padding(
+                        padding: EdgeInsets.symmetric(vertical: 32),
+                        child: Center(
+                          child: SizedBox(
+                            width: 20, height: 20,
+                            child: CircularProgressIndicator(strokeWidth: 2),
+                          ),
+                        ),
+                      )
+                    else if (_nodeList.isEmpty)
+                      const Padding(
+                        padding: EdgeInsets.symmetric(vertical: 32),
+                        child: Center(child: Text("暂无可选节点", style: TextStyle(fontSize: 13, color: Color(0xFF999999)))),
+                      )
+                    else
+                      ..._nodeList.map((node) {
+                        final nodeId = node['node_id'] as String;
+                        final remark = (node['remark'] as String?)?.isNotEmpty == true ? node['remark'] as String : nodeId;
+                        return _buildNodeOptionTile(
+                          label: remark,
+                          subtitle: "", // 【改造】：移除了“当前负载”字段
+                          selected: _selectedNodeId == nodeId,
+                          onTap: () => _onSelectNode(nodeId, remark, sheetContext),
+                        );
+                      }),
+                  ],
                 ),
-                // 【改造】：极简标题，移除了多余的说明语
-                const Text(
-                  "选择线路",
-                  style: TextStyle(
-                    fontSize: 18,
-                    fontWeight: FontWeight.w700,
-                    color: Colors.black87,
-                  ),
-                ),
-                
-                const SizedBox(height: 20),
-                _buildNodeOptionTile(
-                  label: "自动选线",
-                  subtitle: "",
-                  selected: _selectedNodeId == null,
-                  onTap: () => _onSelectNode(null, "自动选线", sheetContext),
-                ),
-                if (_nodeList.isEmpty)
-                  const Padding(
-                    padding: EdgeInsets.symmetric(vertical: 32),
-                    child: Center(child: Text("暂无可选节点", style: TextStyle(fontSize: 13, color: Color(0xFF999999)))),
-                  )
-                else
-                  ..._nodeList.map((node) {
-                    final nodeId = node['node_id'] as String;
-                    final remark = (node['remark'] as String?)?.isNotEmpty == true ? node['remark'] as String : nodeId;
-                    return _buildNodeOptionTile(
-                      label: remark,
-                      subtitle: "", // 【改造】：移除了“当前负载”字段
-                      selected: _selectedNodeId == nodeId,
-                      onTap: () => _onSelectNode(nodeId, remark, sheetContext),
-                    );
-                  }),
-              ],
-            ),
-          ),
+              ),
+            );
+          },
         );
       },
     );
