@@ -15,7 +15,12 @@ public class VpnTunnelPlugin: NSObject, FlutterPlugin, FlutterStreamHandler {
     // EXPIRED 状态，主 App 这边永远读的是另一个容器，读不到。这是 iOS 端
     // 到期后不弹通知的直接原因之一，改成跟 Extension 一致。
     private let appGroup = "group.com.miaolian.myvpn"
-    private let providerBundleId = "com.example.vpnAll.PacketTunnel" // 要跟 Extension target 的 Bundle Identifier 一致
+    // 【最终修复，有实锤依据】：CI 打出的已签名 IPA，用 codesign 直接读出来的
+    // Extension 真实 Bundle Identifier 是 "com.miaolian.myvpn.PacketTunnelExtension"
+    // （application-identifier: 85F7XUQB6K.com.miaolian.myvpn.PacketTunnelExtension），
+    // 这是从签名产物里实测出来的，不是猜的。之前的 "com.example.vpnAll.PacketTunnel"
+    // 是错的占位符，跟真实签名对不上，导致系统报 "not installed"。
+    private let providerBundleId = "com.miaolian.myvpn.PacketTunnelExtension"
 
     public static func register(with registrar: FlutterPluginRegistrar) {
         let instance = VpnTunnelPlugin()
