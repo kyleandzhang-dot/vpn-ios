@@ -118,7 +118,7 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
         break;
       case VpnState.expired:
         _ringAnimController.stop();
-        _showToast("时长不足，请充值");
+        _showToast("时长不足");
         // 安卓侧 CustomVpnService 的心跳检测到403时，已经用原生 NotificationManager
         // 弹过一次「服务已到期」的系统通知了（见 showExpiredNotification()），
         // 这里如果再弹一次 flutter_local_notifications 会导致安卓上重复弹两条。
@@ -315,7 +315,7 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
             _vpnState = VpnState.disconnected;
             _updateUIByState(_vpnState);
           });
-          _showToast("时长不足，请充值");
+          _showToast("时长不足");
           NotificationService.showExpiredNow();
           if (!Platform.isIOS) {
             _openRechargePage();
