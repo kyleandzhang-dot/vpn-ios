@@ -187,6 +187,39 @@ jobs:
           MATCH_GIT_BASIC_AUTHORIZATION: ${{ secrets.MATCH_GIT_BASIC_AUTHORIZATION }}
         run: fastlane adhoc
 
+      - name: DEBUG - 检查 ipa 内部结构和签名(排查 not installed 问题用，确认后可删除)
+        working-directory: ios
+        run: |
+          set -e
+          echo "== 1. 解压 ipa 看内部结构 =="
+          rm -rf /tmp/ipa_check
+          mkdir -p /tmp/ipa_check
+          unzip -q Runner.ipa -d /tmp/ipa_check
+
+          echo ""
+          echo "== 2. Runner.app 根目录下有哪些文件/文件夹 =="
+          ls -la /tmp/ipa_check/Payload/Runner.app/
+
+          echo ""
+          echo "== 3. PlugIns 目录内容(这里应该要有 PacketTunnelExtension.appex) =="
+          ls -la /tmp/ipa_check/Payload/Runner.app/PlugIns/ 2>&1 || echo "❌ PlugIns 目录不存在！Extension 根本没被打进包里"
+
+          echo ""
+          echo "== 4. 主 App 的签名信息 =="
+          codesign -d --entitlements :- /tmp/ipa_check/Payload/Runner.app 2>&1
+
+          echo ""
+          echo "== 5. Extension 的签名信息(如果存在的话) =="
+          EXT_PATH="/tmp/ipa_check/Payload/Runner.app/PlugIns/PacketTunnelExtension.appex"
+          if [ -d "$EXT_PATH" ]; then
+            codesign -d --entitlements :- "$EXT_PATH" 2>&1
+            echo ""
+            echo "== 6. Extension 的 Info.plist 内容(核对 NSExtension 相关字段) =="
+            plutil -p "$EXT_PATH/Info.plist"
+          else
+            echo "❌ Extension 目录不存在，跳过签名检查"
+          fi
+
       - name: Run fastlane beta (可选，由仓库Variable PUSH_TO_TESTFLIGHT 控制，推送TestFlight)
         if: ${{ vars.PUSH_TO_TESTFLIGHT == 'true' }}
         working-directory: ios
