@@ -9,17 +9,8 @@ public class VpnTunnelPlugin: NSObject, FlutterPlugin, FlutterStreamHandler {
 
     private var eventSink: FlutterEventSink?
     private var manager: NETunnelProviderManager?
-    // 【排除测试】：换回旧代码里的值做对照测试。注意：开发者后台的
-    // Identifiers 列表里查不到 com.example.vpnAll.PacketTunnel 这个注册项，
-    // 且上次用 com.miaolian.myvpn.PacketTunnelExtension（后台唯一合法值）
-    // 测试时报的是同一句 "The VPN app used by the VPN configuration is
-    // not installed"——两个不同 ID 报同一个错，大概率说明问题不在这串
-    // 字符串本身，而是 Extension 没有被 Embed & Sign 进包里，或者
-    // Provisioning Profile / Network Extension entitlement 没配好。
-    // 这里改回旧值只是用来排除"是不是字符串问题"，如果还报同样的错，
-    // 就该去查 Xcode 里 Embed & Sign 和 Signing & Capabilities 了。
-    private let appGroup = "group.com.example.vpnAll"
-    private let providerBundleId = "com.example.vpnAll.PacketTunnel"
+    private let appGroup = "group.com.miaolian.myvpn" // 跟 AppDelegate / Extension 里保持一致
+    private let providerBundleId = "com.miaolian.myvpn.PacketTunnelExtension" // 必须跟 Extension target 的真实 Bundle Identifier 完全一致
 
     public static func register(with registrar: FlutterPluginRegistrar) {
         let instance = VpnTunnelPlugin()
@@ -50,16 +41,12 @@ public class VpnTunnelPlugin: NSObject, FlutterPlugin, FlutterStreamHandler {
             // api_base_url 透传给 Extension，供它自己起心跳查到期状态用
             let apiBaseUrl = args["api_base_url"] as? String ?? ""
             connect(nodeJson: nodeJson, apiBaseUrl: apiBaseUrl, result: result)
-        case "getDeviceId":
-            // 关键修复：这个 case 之前压根不存在，导致 Dart 侧 VpnBridge.getDeviceId()
-            // 每次都命中 FlutterMethodNotImplemented、拿到空字符串，进而回退成
-            // ApiService 里存在本地 SharedPreferences 的随机 UUID —— 跟 Extension
-            // 心跳检测读的 Keychain 共享 ID 完全对不上，这才是"用户不存在"的真正原因。
-            // 补上之后，主 App 登录/充值/拉节点用的 device_id 才会跟 Extension
-            // 心跳检测用的 device_id 是同一个。
-            result(DeviceIdManager.getDeviceId())
         case "disconnect":
             disconnect(result: result)
+        case "getDeviceId":
+            // 跟 PacketTunnelProvider 里用的是同一个 DeviceIdManager，
+            // 保证主 App 和 Extension 拿到的是同一个设备号
+            result(DeviceIdManager.getDeviceId())
         default:
             result(FlutterMethodNotImplemented)
         }
@@ -80,7 +67,7 @@ public class VpnTunnelPlugin: NSObject, FlutterPlugin, FlutterStreamHandler {
             proto.providerConfiguration = ["node_json": nodeJson, "api_base_url": apiBaseUrl]
 
             manager.protocolConfiguration = proto
-            manager.localizedDescription = "喵脸"
+            manager.localizedDescription = "秒连VPN"
             manager.isEnabled = true
 
             manager.saveToPreferences { saveError in
