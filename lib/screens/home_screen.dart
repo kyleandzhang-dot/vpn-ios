@@ -713,6 +713,36 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
     Navigator.pop(sheetContext);
   }
 
+  // ================= 极简到期时间专属组件（闲鱼微圆角设计） =================
+  Widget _buildExpireTag() {
+    if (_expireText.isEmpty) return const SizedBox.shrink();
+    
+    // 清洗多余字符与空格，保持极简排版
+    final cleanExpire = _expireText
+        .replaceAll("有效期至: ", "")
+        .replaceAll("有效期至:", "")
+        .replaceAll("服务到期: ", "")
+        .replaceAll("服务到期:", "")
+        .trim();
+
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+      decoration: BoxDecoration(
+        color: const Color(0xFFF2F3F5),
+        borderRadius: BorderRadius.circular(10), // 闲鱼风微圆角，告别土气的 999 胶囊大圆角
+      ),
+      child: Text(
+        "服务到期  $cleanExpire",
+        style: const TextStyle(
+          fontSize: 13, 
+          fontWeight: FontWeight.w600, 
+          color: Color(0xFF444444), // 深灰配色，干净清晰且质感高级
+          letterSpacing: 0.3,
+        ),
+      ),
+    );
+  }
+
   // ================= 页面视图构建 =================
 
   @override
@@ -900,30 +930,8 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
 
         const SizedBox(height: 48),
 
-        // 3. 【极简优化】：到期时间标签，仅在成功获取到时间后自动浮现，未连接前完全留白
-        if (_expireText.isNotEmpty)
-          Container(
-            padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 10),
-            decoration: BoxDecoration(
-              color: const Color(0xFFF7F8FA),
-              borderRadius: BorderRadius.circular(999),
-            ),
-            child: Row(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                const Icon(Icons.access_time_rounded, size: 15, color: Color(0xFF888888)),
-                const SizedBox(width: 6),
-                Text(
-                  _expireText.replaceFirst("有效期至: ", "服务到期: "),
-                  style: const TextStyle(
-                    fontSize: 13, 
-                    fontWeight: FontWeight.w500, 
-                    color: Color(0xFF666666)
-                  ),
-                ),
-              ],
-            ),
-          ),
+        // 3. 【极简优化】：删除了时钟图标和陈旧样式，调用微圆角优雅标签
+        _buildExpireTag(),
       ],
     );
   }
@@ -947,7 +955,8 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
                   child: Container(
                     padding: const EdgeInsets.symmetric(vertical: 16),
                     decoration: BoxDecoration(
-                      color: AppConfig.colorPrimary.withOpacity(0.08),
+                      // 【iOS 适配】：在 iOS 下由于只有单独一个按钮，升级为清爽的高级灰 #F2F3F5，其它系统继续保持主色弱背景
+                      color: Platform.isIOS ? const Color(0xFFF2F3F5) : AppConfig.colorPrimary.withOpacity(0.08),
                       borderRadius: BorderRadius.circular(16),
                     ),
                     alignment: Alignment.center,
@@ -955,8 +964,9 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
                       _inviteBtnText, 
                       style: TextStyle(
                         fontSize: 14, 
-                        fontWeight: FontWeight.w600, 
-                        color: AppConfig.colorPrimary,
+                        // 【iOS 颜色加黑加粗】：解决字颜色太浅看不清的问题，直接改为 #181818 纯黑高对比度
+                        fontWeight: Platform.isIOS ? FontWeight.w700 : FontWeight.w600, 
+                        color: Platform.isIOS ? const Color(0xFF181818) : AppConfig.colorPrimary,
                         letterSpacing: 0.3,
                       ),
                       maxLines: 1, 
@@ -980,7 +990,6 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
                       alignment: Alignment.center,
                       child: const Text(
                         "立即充值", 
-                        // 【修复 Bug】：把原来的 AppConfig.colorPrimary 改为 Colors.white，文字就不会隐身了！
                         style: TextStyle(
                           fontSize: 14, 
                           fontWeight: FontWeight.w600, 

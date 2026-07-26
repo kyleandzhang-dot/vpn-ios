@@ -206,6 +206,7 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
         timer.schedule(deadline: .now() + interval, repeating: interval)
         timer.setEventHandler { [weak self] in
             guard let self = self else { return }
+            NSLog("[Tunnel] 心跳定时器触发 MARKER-V3")
             self.checkUserStatus(apiBaseUrl: self.apiBaseUrl)
         }
         timer.resume()
@@ -215,19 +216,55 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
 
     /// 直接使用当前 Keychain 中的 deviceId，不依赖 Flutter 前台
     private func checkUserStatus(apiBaseUrl: String) {
-        guard let url = URL(string: "\(apiBaseUrl)/api/v1/check_status") else { return }
+        guard let url = URL(string: "\(apiBaseUrl)/api/v1/check_status") else {
+            NSLog("[Tunnel] 心跳 URL 拼接失败，apiBaseUrl=%@ MARKER-V3", apiBaseUrl)
+            return
+        }
         var request = URLRequest(url: url)
         request.httpMethod = "POST"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         request.timeoutInterval = 5.0
         
         // 使用本进程从 Keychain 取到的相同 ID
-        let json: [String: Any] = ["device_id": self.deviceId]
+        let deviceIdSnapshot = self.deviceId
+        let json: [String: Any] = ["device_id": deviceIdSnapshot]
         request.httpBody = try? JSONSerialization.data(withJSONObject: json)
+
+        NSLog("[Tunnel] 心跳请求发出: %@ device_id=%@ MARKER-V3", url.absoluteString, deviceIdSnapshot)
         
         let task = URLSession.shared.dataTask(with: request) { [weak self] data, response, error in
             guard let self = self else { return }
-            if let httpRes = response as? HTTPURLResponse, httpRes.statusCode == 403 {
+
+            // 关键修复：之前只在 403 分支才打日志，请求失败/超时/其他状态码
+            // 全部静默，完全没法排查。现在无论什么结果都打一行，方便对着
+            // go_stderr.log 确认心跳到底有没有真的打到服务器、返回的是什么。
+            if let error = error {
+                NSLog("[Tunnel] 心跳请求失败: %@ MARKER-V3", error.localizedDescription)
+                return
+            }
+            guard let httpRes = response as? HTTPURLResponse else {
+                NSLog("[Tunnel] 心跳请求无 HTTP 响应 MARKER-V3")
+                return
+            }
+            let bodyPreview = data.flatMap { String(data: $0, encoding: .utf8) } ?? "<无body或非UTF8>"
+            NSLog("[Tunnel] 心跳响应: status=%d body=%@ MARKER-V3", httpRes.statusCode, bodyPreview)
+
+            // 关键修复：之前判断的是 HTTP 状态码本身(httpRes.statusCode == 403)，
+            // 但这个后端的约定是 HTTP 永远返回 200，真正的业务状态码放在 JSON body
+            // 的 "code" 字段里——跟安卓 CustomVpnService.kt、以及 api_service.dart
+            // 里其他所有接口(recharge/checkin/getNode 等)的解析方式完全一致。
+            // 之前的写法导致这个分支永远不会命中，无论到没到期都不会触发。
+            guard httpRes.statusCode == 200, let data = data else {
+                NSLog("[Tunnel] 心跳请求非 200 或无 body，跳过本次判断 MARKER-V3")
+                return
+            }
+            guard let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+                  let bizCode = json["code"] as? Int else {
+                NSLog("[Tunnel] 心跳响应 body 解析失败或缺少 code 字段 MARKER-V3")
+                return
+            }
+
+            if bizCode == 403 {
                 NSLog("[Tunnel] 心跳返回 403，账号服务已到期，正在自动断开连接...")
                 // 关键修复：之前这里只断了隧道，从没告诉过主 App"是因为到期断的"，
                 // 所以 Flutter 侧只会收到普通的 disconnected，不会弹到期提示。

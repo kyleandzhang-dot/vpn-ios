@@ -23,16 +23,19 @@ class _InviteScreenState extends State<InviteScreen> {
 
   // TODO: 换成实际的官网/下载页地址（比如放 App Store / APK 直链的落地页），
   // 好友点开分享出去的链接后能在这个页面下载 App
-  static const String _downloadUrl = 'https://your-domain.com/download';
+  static const String _downloadUrl = 'https://miaolian.jmsht.one/';
 
   void _shareInvite() {
     if (_inviteCode.isEmpty || _inviteCode == "加载中..." || _inviteCode == "获取失败") {
       _showToast("邀请码还没准备好，请稍后再试");
       return;
     }
-    final text = '我在用「喵脸」，注册即送免费时长～\n'
-        '用我的邀请码 $_inviteCode 一起解锁更多免费时长：\n'
-        '$_downloadUrl';
+    
+    // 方案二：简短精炼版（适合字数受限或偏向简短交流的场景）
+    final text = '我在用「喵脸」，注册即送免费时长！\n'
+        '下载 App 后，在【邀请计划】中填入我的专属邀请码：$_inviteCode，额外免费天数～\n'
+        '👉 下载链接：$_downloadUrl';
+
     SharePlus.instance.share(
       ShareParams(text: text, subject: '邀请你一起用「喵脸」'),
     );
