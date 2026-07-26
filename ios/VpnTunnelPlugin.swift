@@ -15,7 +15,7 @@ public class VpnTunnelPlugin: NSObject, FlutterPlugin, FlutterStreamHandler {
     // EXPIRED 状态，主 App 这边永远读的是另一个容器，读不到。这是 iOS 端
     // 到期后不弹通知的直接原因之一，改成跟 Extension 一致。
     private let appGroup = "group.com.miaolian.myvpn"
-    private let providerBundleId = "com.miaolian.myvpn.PacketTunnelExtension" // 要跟 Extension target 的 Bundle Identifier 一致
+    private let providerBundleId = "com.example.vpnAll.PacketTunnel" // 要跟 Extension target 的 Bundle Identifier 一致
 
     public static func register(with registrar: FlutterPluginRegistrar) {
         let instance = VpnTunnelPlugin()
@@ -46,6 +46,14 @@ public class VpnTunnelPlugin: NSObject, FlutterPlugin, FlutterStreamHandler {
             // api_base_url 透传给 Extension，供它自己起心跳查到期状态用
             let apiBaseUrl = args["api_base_url"] as? String ?? ""
             connect(nodeJson: nodeJson, apiBaseUrl: apiBaseUrl, result: result)
+        case "getDeviceId":
+            // 关键修复：这个 case 之前压根不存在，导致 Dart 侧 VpnBridge.getDeviceId()
+            // 每次都命中 FlutterMethodNotImplemented、拿到空字符串，进而回退成
+            // ApiService 里存在本地 SharedPreferences 的随机 UUID —— 跟 Extension
+            // 心跳检测读的 Keychain 共享 ID 完全对不上，这才是"用户不存在"的真正原因。
+            // 补上之后，主 App 登录/充值/拉节点用的 device_id 才会跟 Extension
+            // 心跳检测用的 device_id 是同一个。
+            result(DeviceIdManager.getDeviceId())
         case "disconnect":
             disconnect(result: result)
         default:
