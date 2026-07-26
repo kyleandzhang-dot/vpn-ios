@@ -72,6 +72,10 @@ platform :ios do
     match(
       type: "adhoc",
       readonly: false,
+      force: true, # 临时加上：强制重新生成 Profile，确保新加的 Keychain Sharing 权限被写进去。
+                   # match 平时只看 Profile 存不存在/过没过期，不会自动感知 Capability 变化，
+                   # 所以光有 readonly:false 不够，必须 force 一次。确认新 Profile 生效、
+                   # 排查完这轮问题后可以把这行删掉，恢复到只在需要时手动 force。
       api_key: api_key,
       app_identifier: [
         "com.miaolian.myvpn",
