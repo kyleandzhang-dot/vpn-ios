@@ -274,6 +274,15 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
                 self.statusCheckTimer?.cancel()
                 self.statusCheckTimer = nil
                 self.cancelTunnelWithError(NSError(domain: "PacketTunnel", code: 403, userInfo: [NSLocalizedDescriptionKey: "服务已到期"]))
+            } else if bizCode == 404 {
+                // 正常情况下配合 DeviceIdManager 里去横杠的修复后，这个分支不应该再被触发。
+                // 保留这个处理只是为了兜底：万一后端确实查不到这个 device_id
+                // (比如账号被后台删除)，也应该断开，而不是放着不管、一直空转心跳。
+                NSLog("[Tunnel] 心跳返回 404，用户不存在，正在自动断开连接...")
+                self.notifyHostAppExpired()
+                self.statusCheckTimer?.cancel()
+                self.statusCheckTimer = nil
+                self.cancelTunnelWithError(NSError(domain: "PacketTunnel", code: 404, userInfo: [NSLocalizedDescriptionKey: "用户不存在"]))
             }
         }
         task.resume()

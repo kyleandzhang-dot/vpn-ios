@@ -26,8 +26,15 @@ class DeviceIdManager {
         }
 
         // 2. 如果 Keychain 没有，先拿系统的 IDFV，拿不到就保底生成一个 UUID
-        let newId = UIDevice.current.identifierForVendor?.uuidString.uppercased()
-                    ?? UUID().uuidString.uppercased()
+        // ⚠️ 关键修复：这里必须去掉横杠，跟 Dart 侧 api_service.dart 里
+        // nativeId.replaceAll('-', '') 处理后的格式保持完全一致。
+        // 之前这里保留了横杠，导致主 App 用"去横杠"格式向后端注册/绑定用户，
+        // 但 Extension 心跳检测直接调这个方法拿到的是"带横杠"格式去查询，
+        // 两个字符串对不上，后端永远查不到用户，心跳一直返回 404 用户不存在。
+        let newId = (UIDevice.current.identifierForVendor?.uuidString
+                    ?? UUID().uuidString)
+                    .replacingOccurrences(of: "-", with: "")
+                    .uppercased()
 
         // 3. 写入共享 Keychain，保证日后卸载重装、主 App/Extension 两端都能读到同一个值
         saveToKeychain(key: keychainKey, value: newId)
