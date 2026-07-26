@@ -76,10 +76,34 @@ class ApiService {
     return {};
   }
 
+  // ================= UID 本地缓存 =================
+  // 后端 invite_info / get_node 现在都会返回 uid（首页初始化时调 fetchInviteInfo
+  // 就会自动建号+拿到uid，不用非要点一次连接）。这里顺手缓存一份到本地，
+  // 这样主页展示 uid 或者调用 rechargeByUid 时不用每次都等一次网络请求。
+  static const _uidPrefsKey = 'cached_uid';
+
+  static Future<void> _cacheUidIfPresent(Map<String, dynamic>? data) async {
+    final uid = data?['uid']?.toString();
+    if (uid != null && uid.isNotEmpty) {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setString(_uidPrefsKey, uid);
+    }
+  }
+
+  /// 读取本地缓存的uid，还没拿到过就返回 null（正常在 fetchInviteInfo 成功一次后就会有值）
+  static Future<String?> getCachedUid() async {
+    final prefs = await SharedPreferences.getInstance();
+    return prefs.getString(_uidPrefsKey);
+  }
+
   static Future<Map<String, dynamic>> fetchInviteInfo() async {
     final deviceId = await getDeviceId();
     final response = await http.get(Uri.parse('${AppConfig.apiBaseUrl}/api/v1/invite_info?device_id=$deviceId')).timeout(const Duration(seconds: 5));
-    return json.decode(response.body);
+    final result = json.decode(response.body) as Map<String, dynamic>;
+    if (result['code'] == 200) {
+      await _cacheUidIfPresent(result['data'] as Map<String, dynamic>?);
+    }
+    return result;
   }
 
   static Future<Map<String, dynamic>> bindInviteCode(String code) async {
@@ -98,6 +122,17 @@ class ApiService {
       Uri.parse('${AppConfig.apiBaseUrl}/api/v1/recharge'),
       headers: {'Content-Type': 'application/json'},
       body: json.encode({'device_id': deviceId, 'code': code}),
+    ).timeout(const Duration(seconds: 5));
+    return json.decode(response.body);
+  }
+
+  /// 通过 uid（而不是 device_id）充值。用于客服/人工代充场景：
+  /// 用户口头报一个短数字uid，不用抄一长串 device_id。
+  static Future<Map<String, dynamic>> rechargeByUid(String uid, String code) async {
+    final response = await http.post(
+      Uri.parse('${AppConfig.apiBaseUrl}/api/v1/recharge_by_uid'),
+      headers: {'Content-Type': 'application/json'},
+      body: json.encode({'uid': uid, 'code': code}),
     ).timeout(const Duration(seconds: 5));
     return json.decode(response.body);
   }

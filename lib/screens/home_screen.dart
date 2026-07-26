@@ -37,6 +37,7 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
   String _cfgAnnouncement = "";
   String _cfgAnnouncementTitle = "公告";
   bool _showNoticeDot = false;
+  String _uid = "";
 
   bool _checkedInToday = false;
   bool _isCheckinLoading = false;
@@ -124,8 +125,9 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
         // iOS 目前没有等价的原生到期检测逻辑，所以只在 iOS 上补这一条。
         if (Platform.isIOS) {
           NotificationService.showExpiredNow();
+        } else {
+          _openRechargePage();
         }
-        _openRechargePage();
         break;
     }
   }
@@ -134,9 +136,11 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
     ApiService.fetchInviteInfo().then((data) {
       if (data['code'] == 200 && data['data'] != null) {
         final count = data['data']['invited_count'] ?? 0;
+        final uid = data['data']['uid']?.toString() ?? '';
         if (mounted) {
           setState(() {
             _inviteBtnText = count > 0 ? "邀请奖励 (已邀$count人)" : "免费领时长";
+            if (uid.isNotEmpty) _uid = uid;
           });
         }
       }
@@ -297,7 +301,9 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
           });
           _showToast("时长不足，请充值");
           NotificationService.showExpiredNow();
-          _openRechargePage();
+          if (!Platform.isIOS) {
+            _openRechargePage();
+          }
           return;
         } else {
           _cancelConnectTimeout();
@@ -776,13 +782,14 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
             _buildTopBar(),
             Expanded(child: _buildCenterBody()),
             _buildBottomArea(),
+            _buildUidTag(),
           ],
         ),
       ),
     );
   }
 
-  // ================= 3. 将线路选择移到左上角喵脸下面 =================
+  // ================= 3. 将线路选择移到左上角喵脸下面（已替换回文字） =================
   Widget _buildTopBar() {
     return Padding(
       padding: const EdgeInsets.fromLTRB(24, 16, 24, 8),
@@ -794,27 +801,18 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
               crossAxisAlignment: CrossAxisAlignment.start,
               mainAxisSize: MainAxisSize.min,
               children: [
-                // 喵脸 / Logo
-                GestureDetector(
-                  onTap: () {
-                    // 如后续有头像或个人主页，可在此绑定
-                  },
-                  child: Container(
-                    width: 42,
-                    height: 42,
-                    decoration: BoxDecoration(
-                      color: const Color(0xFFF2F3F5),
-                      borderRadius: BorderRadius.circular(14),
-                    ),
-                    child: const Icon(
-                      Icons.pets_rounded,
-                      size: 22,
-                      color: Colors.black87,
-                    ),
+                // 喵脸 / Logo 文字（替换了原有的猫咪脚图标）
+                const Text(
+                  AppConfig.appName, // 默认会显示原有的 "喵脸" 两字
+                  style: TextStyle(
+                    fontSize: 22,
+                    fontWeight: FontWeight.w800,
+                    color: Colors.black87,
+                    letterSpacing: -0.5,
                   ),
                 ),
 
-                const SizedBox(height: 6),
+                const SizedBox(height: 4),
 
                 // 小型线路选择入口
                 GestureDetector(
@@ -985,6 +983,35 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
         _buildExpireTag(),
       ],
     );
+  }
+
+  /// 页面最底部的UID标签：点击复制到剪贴板，方便找客服/人工充值时报号。
+  /// _uid 在 fetchInviteInfo 成功后才会有值，没有值之前不占位置（不显示）。
+  Widget _buildUidTag() {
+    if (_uid.isEmpty) return const SizedBox.shrink();
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 8),
+      child: GestureDetector(
+        onTap: () => _copyUid(),
+        behavior: HitTestBehavior.opaque,
+        child: Row(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Text(
+              "UID: $_uid",
+              style: const TextStyle(fontSize: 12, color: Color(0xFF999999)),
+            ),
+            const SizedBox(width: 4),
+            const Icon(Icons.copy_rounded, size: 12, color: Color(0xFF999999)),
+          ],
+        ),
+      ),
+    );
+  }
+
+  void _copyUid() {
+    Clipboard.setData(ClipboardData(text: _uid));
+    _showToast("UID已复制");
   }
 
   Widget _buildBottomArea() {

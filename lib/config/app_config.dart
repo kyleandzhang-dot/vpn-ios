@@ -3,8 +3,8 @@ import 'package:flutter/material.dart';
 class AppConfig {
   static const String appName = "喵脸";
   
-  static const String apiBaseUrl = "https://shop.jmsht.one"; 
-  //static const String apiBaseUrl = "http://172.20.10.3:8000";
+  //static const String apiBaseUrl = "https://shop.jmsht.one"; 
+  static const String apiBaseUrl = "http://172.20.10.3:8000";
 
   // 极简冷淡配色方案
   static const Color colorBg = Color(0xFFFFFFFF);
