@@ -85,9 +85,15 @@ class ApiService {
   static Future<void> _cacheUidIfPresent(Map<String, dynamic>? data) async {
     final uid = data?['uid']?.toString();
     if (uid != null && uid.isNotEmpty) {
-      final prefs = await SharedPreferences.getInstance();
-      await prefs.setString(_uidPrefsKey, uid);
+      await cacheUid(uid);
     }
+  }
+
+  /// 公开方法：外部（比如 get_node 成功回调）拿到uid后也可以直接调这个存本地缓存
+  static Future<void> cacheUid(String uid) async {
+    if (uid.isEmpty) return;
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString(_uidPrefsKey, uid);
   }
 
   /// 读取本地缓存的uid，还没拿到过就返回 null（正常在 fetchInviteInfo 成功一次后就会有值）
@@ -97,13 +103,23 @@ class ApiService {
   }
 
   static Future<Map<String, dynamic>> fetchInviteInfo() async {
-    final deviceId = await getDeviceId();
-    final response = await http.get(Uri.parse('${AppConfig.apiBaseUrl}/api/v1/invite_info?device_id=$deviceId')).timeout(const Duration(seconds: 5));
-    final result = json.decode(response.body) as Map<String, dynamic>;
-    if (result['code'] == 200) {
-      await _cacheUidIfPresent(result['data'] as Map<String, dynamic>?);
+    try {
+      final deviceId = await getDeviceId();
+      final response = await http
+          .get(Uri.parse('${AppConfig.apiBaseUrl}/api/v1/invite_info?device_id=$deviceId'))
+          .timeout(const Duration(seconds: 8));
+      final result = json.decode(response.body) as Map<String, dynamic>;
+      if (result['code'] == 200) {
+        await _cacheUidIfPresent(result['data'] as Map<String, dynamic>?);
+      }
+      return result;
+    } catch (_) {
+      // 首次冷启动网络栈还没热起来时容易超时/失败，之前这里没有 try/catch，
+      // 请求一失败就直接抛异常，_initData 里 .then() 的成功回调完全不会执行，
+      // uid/邀请信息就再也没机会更新，只能等下次重新打开App。
+      // 改成返回 {code:-1}，让页面走"这次没拿到，下次再试"的分支，而不是静默丢失。
+      return {'code': -1, 'msg': '网络连接异常'};
     }
-    return result;
   }
 
   static Future<Map<String, dynamic>> bindInviteCode(String code) async {

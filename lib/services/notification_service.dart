@@ -90,7 +90,7 @@ class NotificationService {
     await _plugin.show(
       _expireNotificationId + 1,
       '服务已到期',
-      '您的服务时长已用完，点击立即充值。',
+      '您的服务时长已用完。',
       const NotificationDetails(
         android: AndroidNotificationDetails(
           _expireChannelId,

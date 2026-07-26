@@ -133,6 +133,14 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
   }
 
   Future<void> _initData() async {
+    // 先秒读本地缓存的uid（上次成功拿到过的话），不用等这次网络请求，
+    // 避免"看起来空白，几秒后才冒出来"的观感；纯新装设备这里还没有缓存，走下面的网络请求。
+    ApiService.getCachedUid().then((cachedUid) {
+      if (mounted && cachedUid != null && cachedUid.isNotEmpty && _uid.isEmpty) {
+        setState(() => _uid = cachedUid);
+      }
+    });
+
     ApiService.fetchInviteInfo().then((data) {
       if (data['code'] == 200 && data['data'] != null) {
         final count = data['data']['invited_count'] ?? 0;
@@ -293,6 +301,14 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
           final data = jsonBody['data'];
           _pendingNodeJson = json.encode(data['node']);
           _applyExpireTime(data['expire_time']?.toString());
+          // get_node 现在也带uid，多一条独立于 fetchInviteInfo 的兜底路径：
+          // 就算首次冷启动时 fetchInviteInfo 那次网络请求没成功，
+          // 用户一点连接触发 get_node，这里也能把 uid 补上。
+          final nodeUid = data['uid']?.toString();
+          if (nodeUid != null && nodeUid.isNotEmpty) {
+            ApiService.cacheUid(nodeUid);
+            if (mounted) setState(() => _uid = nodeUid);
+          }
         } else if (jsonBody['code'] == 403) {
           _cancelConnectTimeout();
           setState(() {
@@ -855,18 +871,20 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
             padding: const EdgeInsets.only(top: 2),
             child: Row(
               children: [
-                GestureDetector(
-                  onTap: _shareNativeLog,
-                  child: Container(
-                    margin: const EdgeInsets.only(right: 12),
-                    padding: const EdgeInsets.all(10),
-                    decoration: const BoxDecoration(
-                      color: Color(0xFFF2F3F5), 
-                      shape: BoxShape.circle, 
+                // 暂时在 iOS 下隐藏导出日志按钮
+                if (!Platform.isIOS)
+                  GestureDetector(
+                    onTap: _shareNativeLog,
+                    child: Container(
+                      margin: const EdgeInsets.only(right: 12),
+                      padding: const EdgeInsets.all(10),
+                      decoration: const BoxDecoration(
+                        color: Color(0xFFF2F3F5), 
+                        shape: BoxShape.circle, 
+                      ),
+                      child: const Icon(Icons.bug_report_outlined, size: 20, color: Colors.black87),
                     ),
-                    child: const Icon(Icons.bug_report_outlined, size: 20, color: Colors.black87),
                   ),
-                ),
                 GestureDetector(
                   onTap: _showNoticeDialog,
                   child: Container(
@@ -1015,6 +1033,11 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
   }
 
   Widget _buildBottomArea() {
+    // 暂时在 iOS 平台隐藏整个底部区域（包含免费领取时长）
+    if (Platform.isIOS) {
+      return const SizedBox.shrink();
+    }
+
     return Padding(
       padding: const EdgeInsets.fromLTRB(24, 0, 24, 16),
       child: Column(
