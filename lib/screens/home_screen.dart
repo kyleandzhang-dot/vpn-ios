@@ -8,6 +8,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import '../config/app_config.dart';
 import '../services/api_service.dart';
 import '../services/vpn_bridge.dart';
+import '../services/notification_service.dart';
 import '../widgets/power_ring_view.dart';
 import 'recharge_screen.dart';
 import 'market_screen.dart';
@@ -117,6 +118,13 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
       case VpnState.expired:
         _ringAnimController.stop();
         _showToast("时长不足，请充值");
+        // 安卓侧 CustomVpnService 的心跳检测到403时，已经用原生 NotificationManager
+        // 弹过一次「服务已到期」的系统通知了（见 showExpiredNotification()），
+        // 这里如果再弹一次 flutter_local_notifications 会导致安卓上重复弹两条。
+        // iOS 目前没有等价的原生到期检测逻辑，所以只在 iOS 上补这一条。
+        if (Platform.isIOS) {
+          NotificationService.showExpiredNow();
+        }
         _openRechargePage();
         break;
     }
@@ -231,6 +239,21 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
     Navigator.push(context, MaterialPageRoute(builder: (_) => const RechargeScreen()));
   }
 
+  /// 统一更新到期文案 + 排定到期前的本地通知提醒
+  void _applyExpireTime(String? expireTimeStr) {
+    if (expireTimeStr == null || expireTimeStr.isEmpty) return;
+    setState(() => _expireText = "有效期至: $expireTimeStr");
+    final parsed = DateTime.tryParse(expireTimeStr);
+    if (parsed != null) {
+      NotificationService.scheduleExpireReminder(
+        expireTime: parsed,
+        before: const Duration(hours: 1),
+      );
+    } else {
+      debugPrint('[Notify] 无法解析到期时间: $expireTimeStr');
+    }
+  }
+
   void _toggleConnect() async {
     if (_vpnState == VpnState.connected) {
       await VpnBridge.disconnect();
@@ -265,9 +288,7 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
         if (jsonBody['code'] == 200) {
           final data = jsonBody['data'];
           _pendingNodeJson = json.encode(data['node']);
-          setState(() {
-            _expireText = "有效期至: ${data['expire_time']}";
-          });
+          _applyExpireTime(data['expire_time']?.toString());
         } else if (jsonBody['code'] == 403) {
           _cancelConnectTimeout();
           setState(() {
@@ -275,6 +296,7 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
             _updateUIByState(_vpnState);
           });
           _showToast("时长不足，请充值");
+          NotificationService.showExpiredNow();
           _openRechargePage();
           return;
         } else {
@@ -332,7 +354,6 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
 
   // ================= 业务交互调用 =================
 
-  // 【对接原生】调用 iOS 端 AppDelegate 中的 shareLog 导出 go_stderr.log 日志
   Future<void> _shareNativeLog() async {
     try {
       final Map<dynamic, dynamic>? res = await _logChannel.invokeMethod('shareLog');
@@ -472,7 +493,7 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
                     _showToast("正在验证...");
                     final res = await ApiService.recharge(code);
                     if (res['code'] == 200) {
-                      setState(() => _expireText = "有效期至: ${res['data']['new_expire_time']}");
+                      _applyExpireTime(res['data']?['new_expire_time']?.toString());
                     }
                     _showToast(res['msg'] ?? "处理完成");
                   },
@@ -497,8 +518,8 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
         setState(() {
           _checkedInToday = true;
           _checkinStreak = res['data']['streak_days'] ?? _checkinStreak;
-          _expireText = "有效期至: ${res['data']['new_expire_time']}";
         });
+        _applyExpireTime(res['data']['new_expire_time']?.toString());
         _showToast("签到成功，时长 +$rewardMinutes 分钟");
       } else {
         if (res['code'] == 400) {
@@ -618,13 +639,19 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
                     decoration: BoxDecoration(color: const Color(0xFFE0E0E0), borderRadius: BorderRadius.circular(2)),
                   ),
                 ),
-                const Text("选择线路节点", style: TextStyle(fontSize: 17, fontWeight: FontWeight.w700, color: Colors.black87)),
-                const SizedBox(height: 6),
-                const Text("未连接状态下切换线路即可生效", style: TextStyle(fontSize: 12, color: Color(0xFF888888))),
+                // 【改造】：极简标题，移除了多余的说明语
+                const Text(
+                  "选择线路",
+                  style: TextStyle(
+                    fontSize: 18,
+                    fontWeight: FontWeight.w700,
+                    color: Colors.black87,
+                  ),
+                ),
                 const SizedBox(height: 20),
                 _buildNodeOptionTile(
                   label: "自动选线",
-                  subtitle: "智能推荐当前延迟最低的节点",
+                  subtitle: "",
                   selected: _selectedNodeId == null,
                   onTap: () => _onSelectNode(null, "自动选线", sheetContext),
                 ),
@@ -639,7 +666,7 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
                     final remark = (node['remark'] as String?)?.isNotEmpty == true ? node['remark'] as String : nodeId;
                     return _buildNodeOptionTile(
                       label: remark,
-                      subtitle: "当前负载 ${node['load'] ?? 0}%",
+                      subtitle: "", // 【改造】：移除了“当前负载”字段
                       selected: _selectedNodeId == nodeId,
                       onTap: () => _onSelectNode(nodeId, remark, sheetContext),
                     );
@@ -685,8 +712,10 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
                       color: selected ? AppConfig.colorPrimary : Colors.black87
                     )
                   ),
-                  const SizedBox(height: 4),
-                  Text(subtitle, style: const TextStyle(fontSize: 12, color: Color(0xFF888888))),
+                  if (subtitle.isNotEmpty) ...[
+                    const SizedBox(height: 4),
+                    Text(subtitle, style: const TextStyle(fontSize: 12, color: Color(0xFF888888))),
+                  ]
                 ],
               ),
             ),
@@ -713,11 +742,10 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
     Navigator.pop(sheetContext);
   }
 
-  // ================= 极简到期时间专属组件（闲鱼微圆角设计） =================
+  // ================= 1. 改为极简字体的「服务到期」 =================
   Widget _buildExpireTag() {
     if (_expireText.isEmpty) return const SizedBox.shrink();
-    
-    // 清洗多余字符与空格，保持极简排版
+
     final cleanExpire = _expireText
         .replaceAll("有效期至: ", "")
         .replaceAll("有效期至:", "")
@@ -725,20 +753,13 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
         .replaceAll("服务到期:", "")
         .trim();
 
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-      decoration: BoxDecoration(
-        color: const Color(0xFFF2F3F5),
-        borderRadius: BorderRadius.circular(10), // 闲鱼风微圆角，告别土气的 999 胶囊大圆角
-      ),
-      child: Text(
-        "服务到期  $cleanExpire",
-        style: const TextStyle(
-          fontSize: 13, 
-          fontWeight: FontWeight.w600, 
-          color: Color(0xFF444444), // 深灰配色，干净清晰且质感高级
-          letterSpacing: 0.3,
-        ),
+    return Text(
+      "服务有效至 $cleanExpire",
+      style: const TextStyle(
+        fontSize: 12,
+        fontWeight: FontWeight.w500,
+        color: Color(0xFF999999),
+        letterSpacing: 0.2,
       ),
     );
   }
@@ -761,123 +782,152 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
     );
   }
 
+  // ================= 3. 将线路选择移到左上角喵脸下面 =================
   Widget _buildTopBar() {
     return Padding(
       padding: const EdgeInsets.fromLTRB(24, 16, 24, 8),
       child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          const Expanded(
-            child: Text(
-              AppConfig.appName, 
-              style: TextStyle(
-                fontSize: 22, 
-                fontWeight: FontWeight.w800, 
-                color: Colors.black87, 
-                letterSpacing: -0.5
-              )
-            ),
-          ),
-          // 【真正对接原生的按钮】调用 _shareNativeLog 调起 iOS 系统的 UIActivityViewController 分享日志
-          GestureDetector(
-            onTap: _shareNativeLog,
-            child: Container(
-              margin: const EdgeInsets.only(right: 12),
-              padding: const EdgeInsets.all(10),
-              decoration: const BoxDecoration(
-                color: Color(0xFFF2F3F5), 
-                shape: BoxShape.circle, 
-              ),
-              child: const Icon(Icons.bug_report_outlined, size: 20, color: Colors.black87),
-            ),
-          ),
-          GestureDetector(
-            onTap: _showNoticeDialog,
-            child: Container(
-              margin: const EdgeInsets.only(right: 12),
-              padding: const EdgeInsets.all(10),
-              decoration: const BoxDecoration(
-                color: Color(0xFFF2F3F5), 
-                shape: BoxShape.circle, 
-              ),
-              child: Stack(
-                clipBehavior: Clip.none,
-                children: [
-                  const Icon(Icons.notifications_none_rounded, size: 20, color: Colors.black87),
-                  if (_showNoticeDot)
-                    Positioned(
-                      right: -1, top: -1,
-                      child: Container(
-                        width: 7, height: 7, 
-                        decoration: const BoxDecoration(color: Color(0xFFFF4D4F), shape: BoxShape.circle)
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                // 喵脸 / Logo
+                GestureDetector(
+                  onTap: () {
+                    // 如后续有头像或个人主页，可在此绑定
+                  },
+                  child: Container(
+                    width: 42,
+                    height: 42,
+                    decoration: BoxDecoration(
+                      color: const Color(0xFFF2F3F5),
+                      borderRadius: BorderRadius.circular(14),
+                    ),
+                    child: const Icon(
+                      Icons.pets_rounded,
+                      size: 22,
+                      color: Colors.black87,
+                    ),
+                  ),
+                ),
+
+                const SizedBox(height: 6),
+
+                // 小型线路选择入口
+                GestureDetector(
+                  onTap: _vpnState == VpnState.connected ||
+                          _vpnState == VpnState.connecting
+                      ? null
+                      : _showNodePickerSheet,
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Text(
+                        _selectedNodeLabel,
+                        style: TextStyle(
+                          fontSize: 11,
+                          fontWeight: FontWeight.w500,
+                          color: (_vpnState == VpnState.connected ||
+                                  _vpnState == VpnState.connecting)
+                              ? const Color(0xFFBBBBBB)
+                              : const Color(0xFF777777),
+                        ),
                       ),
-                    )
-                ],
-              ),
+                      const SizedBox(width: 2),
+                      Icon(
+                        Icons.keyboard_arrow_down_rounded,
+                        size: 13,
+                        color: (_vpnState == VpnState.connected ||
+                                _vpnState == VpnState.connecting)
+                            ? const Color(0xFFBBBBBB)
+                            : const Color(0xFF777777),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
             ),
           ),
-          if (!Platform.isIOS)
-            GestureDetector(
-              onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const MarketScreen())),
-              child: Container(
-                padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
-                decoration: BoxDecoration(
-                  color: const Color(0xFFF2F3F5), 
-                  borderRadius: BorderRadius.circular(999), 
+          
+          // 右侧常规操作区（Bug日志/公告等）
+          Padding(
+            padding: const EdgeInsets.only(top: 2),
+            child: Row(
+              children: [
+                GestureDetector(
+                  onTap: _shareNativeLog,
+                  child: Container(
+                    margin: const EdgeInsets.only(right: 12),
+                    padding: const EdgeInsets.all(10),
+                    decoration: const BoxDecoration(
+                      color: Color(0xFFF2F3F5), 
+                      shape: BoxShape.circle, 
+                    ),
+                    child: const Icon(Icons.bug_report_outlined, size: 20, color: Colors.black87),
+                  ),
                 ),
-                child: const Text(
-                  "海外应用", 
-                  style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: Colors.black87)
+                GestureDetector(
+                  onTap: _showNoticeDialog,
+                  child: Container(
+                    margin: const EdgeInsets.only(right: 12),
+                    padding: const EdgeInsets.all(10),
+                    decoration: const BoxDecoration(
+                      color: Color(0xFFF2F3F5), 
+                      shape: BoxShape.circle, 
+                    ),
+                    child: Stack(
+                      clipBehavior: Clip.none,
+                      children: [
+                        const Icon(Icons.notifications_none_rounded, size: 20, color: Colors.black87),
+                        if (_showNoticeDot)
+                          Positioned(
+                            right: -1, top: -1,
+                            child: Container(
+                              width: 7, height: 7, 
+                              decoration: const BoxDecoration(color: Color(0xFFFF4D4F), shape: BoxShape.circle)
+                            ),
+                          )
+                      ],
+                    ),
+                  ),
                 ),
-              ),
-            )
+                if (!Platform.isIOS)
+                  GestureDetector(
+                    onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const MarketScreen())),
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+                      decoration: BoxDecoration(
+                        color: const Color(0xFFF2F3F5), 
+                        borderRadius: BorderRadius.circular(999), 
+                      ),
+                      child: const Text(
+                        "海外应用", 
+                        style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: Colors.black87)
+                      ),
+                    ),
+                  )
+              ],
+            ),
+          ),
         ],
       ),
     );
   }
 
+  // ================= 2. 删除了中间的「选择路线」组件 =================
   Widget _buildCenterBody() {
     final isConnected = _vpnState == VpnState.connected;
-    final canPickNode = _vpnState != VpnState.connected && _vpnState != VpnState.connecting;
 
     return Column(
       mainAxisAlignment: MainAxisAlignment.center,
       children: [
-        // 1. 顶部节点切换
-        GestureDetector(
-          onTap: _showNodePickerSheet,
-          child: Container(
-            padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 9),
-            decoration: BoxDecoration(
-              color: const Color(0xFFF2F3F5),
-              borderRadius: BorderRadius.circular(999),
-            ),
-            child: Row(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Text(
-                  _selectedNodeLabel,
-                  style: TextStyle(
-                    fontSize: 13, 
-                    fontWeight: FontWeight.w600, 
-                    color: canPickNode ? Colors.black87 : const Color(0xFF999999)
-                  ),
-                ),
-                const SizedBox(width: 4),
-                Icon(
-                  Icons.keyboard_arrow_down_rounded, 
-                  size: 16, 
-                  color: canPickNode ? Colors.black87 : const Color(0xFF999999)
-                ),
-              ],
-            ),
-          ),
-        ),
-
-        const SizedBox(height: 48),
-
-        // 2. 核心大环形连接按钮
+        // 核心大环形连接按钮
         SizedBox(
-          width: 210, height: 210,
+          width: 210, 
+          height: 210,
           child: Stack(
             alignment: Alignment.center,
             children: [
@@ -894,7 +944,8 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
                 child: AnimatedContainer(
                   duration: const Duration(milliseconds: 300),
                   curve: Curves.easeOutCubic,
-                  width: 176, height: 176,
+                  width: 176, 
+                  height: 176,
                   decoration: BoxDecoration(
                     color: isConnected ? AppConfig.colorBg : AppConfig.colorPrimary,
                     shape: BoxShape.circle,
@@ -928,9 +979,9 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
           ),
         ),
 
-        const SizedBox(height: 48),
+        const SizedBox(height: 32),
 
-        // 3. 【极简优化】：删除了时钟图标和陈旧样式，调用微圆角优雅标签
+        // 服务有效期（纯纯的细文本文字）
         _buildExpireTag(),
       ],
     );
@@ -955,7 +1006,6 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
                   child: Container(
                     padding: const EdgeInsets.symmetric(vertical: 16),
                     decoration: BoxDecoration(
-                      // 【iOS 适配】：在 iOS 下由于只有单独一个按钮，升级为清爽的高级灰 #F2F3F5，其它系统继续保持主色弱背景
                       color: Platform.isIOS ? const Color(0xFFF2F3F5) : AppConfig.colorPrimary.withOpacity(0.08),
                       borderRadius: BorderRadius.circular(16),
                     ),
@@ -964,7 +1014,6 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
                       _inviteBtnText, 
                       style: TextStyle(
                         fontSize: 14, 
-                        // 【iOS 颜色加黑加粗】：解决字颜色太浅看不清的问题，直接改为 #181818 纯黑高对比度
                         fontWeight: Platform.isIOS ? FontWeight.w700 : FontWeight.w600, 
                         color: Platform.isIOS ? const Color(0xFF181818) : AppConfig.colorPrimary,
                         letterSpacing: 0.3,
@@ -975,7 +1024,6 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
                   ),
                 ),
               ),
-              // 【iOS适配改动】：如果是 iOS 系统，直接隐藏右侧的充值按钮，让左边的邀请领时长按钮独占全宽
               if (!Platform.isIOS) ...[
                 const SizedBox(width: 12),
                 Expanded(
@@ -1006,7 +1054,6 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
 
           const SizedBox(height: 16),
 
-          // 【iOS适配改动】：如果是 iOS 系统，把兑换卡密的文字入口一起隐藏掉，规避苹果审核风险
           if (!Platform.isIOS)
             GestureDetector(
               onTap: _showRechargeDialog,
