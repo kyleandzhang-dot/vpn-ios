@@ -32,7 +32,13 @@ class ApiService {
         // 走 Keychain 生成的 ID 是两份完全不同的值，会导致后台隧道心跳
         // 检测账号状态时用的 device_id 跟登录/付费用的对不上。
         // 改成走 native 方法通道，读同一份存在共享 Keychain 里的 ID。
-        final nativeId = await VpnBridge.getDeviceId();
+        // ⚠️ 这个 MethodChannel 调用之前没有超时保护：如果 Network Extension
+        // 或 Keychain 访问那边卡住，await 会一直挂起、既不报错也不超时，
+        // 导致下面 fetchInviteInfo 里给 http 请求设的 8 秒超时根本没机会生效
+        // （代码压根走不到发请求那一步），首页 UID 就会一直卡在"获取中..."。
+        // 加个 5 秒超时兜底，超时就当作取不到原生 ID，走后面的 UUID 兜底逻辑。
+        final nativeId = await VpnBridge.getDeviceId()
+            .timeout(const Duration(seconds: 5), onTimeout: () => '');
         deviceId = nativeId.isNotEmpty
             ? nativeId.replaceAll('-', '').toUpperCase()
             : null;

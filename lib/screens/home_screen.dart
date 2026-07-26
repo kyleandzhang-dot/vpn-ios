@@ -38,6 +38,7 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
   String _cfgAnnouncementTitle = "公告";
   bool _showNoticeDot = false;
   String _uid = "";
+  bool _uidFetchFailed = false; // 重试一次仍失败后置 true，UI 提示可点击重试
 
   bool _checkedInToday = false;
   bool _isCheckinLoading = false;
@@ -141,18 +142,7 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
       }
     });
 
-    ApiService.fetchInviteInfo().then((data) {
-      if (data['code'] == 200 && data['data'] != null) {
-        final count = data['data']['invited_count'] ?? 0;
-        final uid = data['data']['uid']?.toString() ?? '';
-        if (mounted) {
-          setState(() {
-            _inviteBtnText = count > 0 ? "邀请奖励 (已邀$count人)" : "免费领时长";
-            if (uid.isNotEmpty) _uid = uid;
-          });
-        }
-      }
-    });
+    _fetchInviteInfoWithRetry();
 
     _loadNodes();
     _loadSelectedNode();
@@ -184,6 +174,44 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
       } else if (mounted) {
         _showCheckinDialog();
       }
+    }
+  }
+
+  /// 拉取邀请信息（顺带拿 uid）。之前的写法是失败了就直接放弃——
+  /// 首次冷启动网络栈没热，或者 iOS 原生取设备号的通道慢一点，
+  /// 就会导致 UID 永远卡在"获取中..."，没有任何重试。
+  /// 这里改成：失败/超时自动重试一次（等 2 秒，给网络栈缓一口气），
+  /// 两次都失败就标记 _uidFetchFailed，UI 上把"获取中..."换成
+  /// "获取失败，点击重试"，用户可以手动再触发一次。
+  Future<void> _fetchInviteInfoWithRetry({bool isRetry = false}) async {
+    final data = await ApiService.fetchInviteInfo();
+    if (data['code'] == 200 && data['data'] != null) {
+      final count = data['data']['invited_count'] ?? 0;
+      final uid = data['data']['uid']?.toString() ?? '';
+      if (mounted) {
+        setState(() {
+          _inviteBtnText = count > 0 ? "邀请奖励 (已邀$count人)" : "免费领时长";
+          if (uid.isNotEmpty) {
+            _uid = uid;
+            _uidFetchFailed = false;
+          }
+        });
+      }
+      return;
+    }
+
+    // 第一次失败：等 2 秒自动重试一次，不打扰用户
+    if (!isRetry) {
+      await Future.delayed(const Duration(seconds: 2));
+      if (!mounted) return;
+      await _fetchInviteInfoWithRetry(isRetry: true);
+      return;
+    }
+
+    // 重试过一次还是失败，且这次真的没拿到 uid（不是本地缓存兜底过了），
+    // 才标记成失败态，让用户可以点击手动重试
+    if (mounted && _uid.isEmpty) {
+      setState(() => _uidFetchFailed = true);
     }
   }
 
@@ -1006,7 +1034,14 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
   /// 页面最底部的UID标签：改为常驻打开显示，点击复制到剪贴板。
   /// 即使在 iOS 隐藏了底部功能区，UID 也会固定呈现在页面下方。
   Widget _buildUidTag() {
-    final displayUid = _uid.isEmpty ? "获取中..." : _uid;
+    String displayUid;
+    if (_uid.isNotEmpty) {
+      displayUid = _uid;
+    } else if (_uidFetchFailed) {
+      displayUid = "获取失败，点击重试";
+    } else {
+      displayUid = "获取中...";
+    }
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 14),
       child: GestureDetector(
@@ -1033,7 +1068,14 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
 
   void _copyUid() {
     if (_uid.isEmpty) {
-      _showToast("UID正在获取中，请稍后");
+      // 之前失败/还在获取时点击只会弹个"请稍后"，用户除了干等没别的办法。
+      // 现在点一下就手动再拉一次（不再等自动重试的 2 秒延迟），
+      // 拉取失败态也顺手清掉，避免一直显示"获取失败"。
+      _showToast(_uidFetchFailed ? "正在重新获取 UID..." : "UID正在获取中，请稍后");
+      if (_uidFetchFailed) {
+        setState(() => _uidFetchFailed = false);
+        _fetchInviteInfoWithRetry();
+      }
       return;
     }
     Clipboard.setData(ClipboardData(text: _uid));
