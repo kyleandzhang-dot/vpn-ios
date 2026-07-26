@@ -4,6 +4,8 @@ import 'dart:async';
 import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:flutter/gestures.dart';
+import 'package:url_launcher/url_launcher.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../config/app_config.dart';
 import '../services/api_service.dart';
@@ -421,6 +423,65 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
     }
   }
 
+  // ================= 公告链接识别 =================
+
+  // 匹配 http/https 链接：排除空白符、中文字符和常见中文标点，
+  // 这样公告里写"详情见 https://xxx.com，谢谢"这种紧跟中文逗号的情况，
+  // 逗号不会被当成链接的一部分。
+  static final RegExp _urlPattern = RegExp(
+    r'https?:\/\/[^\s\u4e00-\u9fff，。！？；：、""''《》【】]+',
+    caseSensitive: false,
+  );
+
+  /// 把公告文本按 URL 切段，普通文字保持原样，URL 部分做成带下划线的
+  /// 可点击 TextSpan。英文链接后面偶尔会紧跟句号/右括号这类英文标点，
+  /// 正则会把它们一起吃进去，这里额外裁掉尾部的这几种符号，
+  /// 避免用户点进去的链接末尾多一个 "." 或 ")" 导致打不开。
+  List<InlineSpan> _buildAnnouncementSpans(String text) {
+    final spans = <InlineSpan>[];
+    int lastEnd = 0;
+    for (final match in _urlPattern.allMatches(text)) {
+      if (match.start > lastEnd) {
+        spans.add(TextSpan(text: text.substring(lastEnd, match.start)));
+      }
+      var url = match.group(0)!;
+      while (url.isNotEmpty && ').,;:!?'.contains(url[url.length - 1])) {
+        url = url.substring(0, url.length - 1);
+      }
+      spans.add(
+        TextSpan(
+          text: url,
+          style: TextStyle(
+            color: AppConfig.colorPrimary,
+            decoration: TextDecoration.underline,
+            fontWeight: FontWeight.w600,
+          ),
+          recognizer: TapGestureRecognizer()..onTap = () => _openAnnouncementLink(url),
+        ),
+      );
+      lastEnd = match.start + url.length; // 用裁剪后的长度定位剩余文本起点，被裁掉的标点会回到下一段普通文字里正常显示
+    }
+    if (lastEnd < text.length) {
+      spans.add(TextSpan(text: text.substring(lastEnd)));
+    }
+    return spans;
+  }
+
+  Future<void> _openAnnouncementLink(String url) async {
+    final uri = Uri.tryParse(url);
+    if (uri == null) {
+      _showToast("链接格式有误");
+      return;
+    }
+    try {
+      final ok = await launchUrl(uri, mode: LaunchMode.externalApplication);
+      if (!ok && mounted) _showToast("无法打开链接");
+    } catch (e) {
+      debugPrint('[Notice] 打开公告链接失败: $e');
+      if (mounted) _showToast("打开链接失败");
+    }
+  }
+
   void _showNoticeDialog() {
     _isDialogActive = true;
     showDialog(
@@ -445,12 +506,16 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
                 ),
               ),
               const SizedBox(height: 16),
-              Text(
-                _cfgAnnouncement.isNotEmpty ? _cfgAnnouncement : "暂无公告",
-                style: const TextStyle(
-                  fontSize: 14,
-                  color: Color(0xFF666666),
-                  height: 1.6, 
+              SelectableText.rich(
+                TextSpan(
+                  style: const TextStyle(
+                    fontSize: 14,
+                    color: Color(0xFF666666),
+                    height: 1.6,
+                  ),
+                  children: _cfgAnnouncement.isNotEmpty
+                      ? _buildAnnouncementSpans(_cfgAnnouncement)
+                      : const [TextSpan(text: "暂无公告")],
                 ),
               ),
               const SizedBox(height: 32),
