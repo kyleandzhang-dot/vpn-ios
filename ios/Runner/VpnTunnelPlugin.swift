@@ -9,16 +9,18 @@ public class VpnTunnelPlugin: NSObject, FlutterPlugin, FlutterStreamHandler {
 
     private var eventSink: FlutterEventSink?
     private var manager: NETunnelProviderManager?
-    // 【修复 Bug】：之前这里写的是 "group.com.example.vpnAll"，跟
-    // PacketTunnelProvider.swift / AppDelegate.swift 里实际用的
-    // "group.com.miaolian.myvpn" 不是同一个 App Group —— Extension 写的
-    // EXPIRED 状态，主 App 这边永远读的是另一个容器，读不到。这是 iOS 端
-    // 到期后不弹通知的直接原因之一，改成跟 Extension 一致。
+    // 根据 Apple Developer 后台 Identifiers 列表核实：主 App ID 是
+    // com.miaolian.myvpn，Extension 的 Bundle ID 必须以主 App ID 为前缀，
+    // 后台里唯一合法的就是 com.miaolian.myvpn.PacketTunnelExtension。
+    // "com.example.vpnAll.PacketTunnel" 在开发者后台里根本没注册过，是
+    // 模板占位符，绝对不能用，用了系统就找不到 Extension，报
+    // "The VPN app used by the VPN configuration is not installed"。
+    // appGroup 待确认：后台注册了 group.com.miaolian / group.com.miaolian.myvpn /
+    // group.com.miaolian.myvpn.shared 三个，需要去 Xcode 里 Runner 和
+    // Extension 两个 target 的 Signing & Capabilities -> App Groups 里
+    // 核对实际打钩的是哪一个，两边必须一致。下面先按目前已知信息填最像的一个，
+    // 务必去 Xcode 核实后再改。
     private let appGroup = "group.com.miaolian.myvpn"
-    // 【修复 Bug】：之前这里写的是 "com.example.vpnAll.PacketTunnel"，是个从没对过的
-    // 占位符，跟真实的 Extension target Bundle Identifier 完全不一致，导致系统报
-    // "The VPN app used by the VPN configuration is not installed"，隧道进程根本
-    // 拉不起来，Extension 从没执行过，go_stderr.log 也就从没生成过。
     private let providerBundleId = "com.miaolian.myvpn.PacketTunnelExtension"
 
     public static func register(with registrar: FlutterPluginRegistrar) {
