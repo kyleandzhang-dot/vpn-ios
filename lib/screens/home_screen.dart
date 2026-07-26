@@ -1003,12 +1003,12 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
     );
   }
 
-  /// 页面最底部的UID标签：点击复制到剪贴板，方便找客服/人工充值时报号。
-  /// _uid 在 fetchInviteInfo 成功后才会有值，没有值之前不占位置（不显示）。
+  /// 页面最底部的UID标签：改为常驻打开显示，点击复制到剪贴板。
+  /// 即使在 iOS 隐藏了底部功能区，UID 也会固定呈现在页面下方。
   Widget _buildUidTag() {
-    if (_uid.isEmpty) return const SizedBox.shrink();
+    final displayUid = _uid.isEmpty ? "获取中..." : _uid;
     return Padding(
-      padding: const EdgeInsets.only(bottom: 8),
+      padding: const EdgeInsets.symmetric(vertical: 14),
       child: GestureDetector(
         onTap: () => _copyUid(),
         behavior: HitTestBehavior.opaque,
@@ -1016,11 +1016,15 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
             Text(
-              "UID: $_uid",
-              style: const TextStyle(fontSize: 12, color: Color(0xFF999999)),
+              "UID: $displayUid",
+              style: const TextStyle(
+                fontSize: 13, 
+                color: Color(0xFF888888),
+                fontWeight: FontWeight.w500,
+              ),
             ),
             const SizedBox(width: 4),
-            const Icon(Icons.copy_rounded, size: 12, color: Color(0xFF999999)),
+            const Icon(Icons.copy_rounded, size: 14, color: Color(0xFF888888)),
           ],
         ),
       ),
@@ -1028,6 +1032,10 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
   }
 
   void _copyUid() {
+    if (_uid.isEmpty) {
+      _showToast("UID正在获取中，请稍后");
+      return;
+    }
     Clipboard.setData(ClipboardData(text: _uid));
     _showToast("UID已复制");
   }
