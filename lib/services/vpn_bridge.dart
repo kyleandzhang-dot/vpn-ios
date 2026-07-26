@@ -42,9 +42,16 @@ class VpnBridge {
     return _statusStream!;
   }
 
-  static Future<void> connect(String nodeJson) async {
+  /// [apiBaseUrl] 会透传给 iOS 原生的 PacketTunnelProvider(Network Extension)，
+  /// 供它在隧道进程里自己定时查账号是否到期。安卓这边如果心跳检测走的是
+  /// 应用内 VpnService（跟主 App 同进程），不需要这个参数也能正常工作，
+  /// 传了也不影响。
+  static Future<void> connect(String nodeJson, {String apiBaseUrl = ''}) async {
     try {
-      await _channel.invokeMethod('connect', {'node_json': nodeJson});
+      await _channel.invokeMethod('connect', {
+        'node_json': nodeJson,
+        'api_base_url': apiBaseUrl,
+      });
     } catch (e) {
       rethrow;
     }

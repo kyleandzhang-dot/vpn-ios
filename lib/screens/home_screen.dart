@@ -306,7 +306,7 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
     }
 
     try {
-      await VpnBridge.connect(_pendingNodeJson!);
+      await VpnBridge.connect(_pendingNodeJson!, apiBaseUrl: AppConfig.apiBaseUrl);
     } catch (e) {
       debugPrint('[VPN] VpnBridge.connect 失败: $e');
       _cancelConnectTimeout();
@@ -900,31 +900,30 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
 
         const SizedBox(height: 48),
 
-        // 3. 【减法优化】：纯到期时间标签，删除了连接状态和圆点
-        Container(
-          padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 10),
-          decoration: BoxDecoration(
-            color: const Color(0xFFF7F8FA),
-            borderRadius: BorderRadius.circular(999),
-          ),
-          child: Row(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              const Icon(Icons.access_time_rounded, size: 15, color: Color(0xFF888888)),
-              const SizedBox(width: 6),
-              Text(
-                _expireText.isNotEmpty 
-                    ? _expireText.replaceFirst("有效期至: ", "服务到期: ") 
-                    : "点击连接获取服务时长",
-                style: const TextStyle(
-                  fontSize: 13, 
-                  fontWeight: FontWeight.w500, 
-                  color: Color(0xFF666666)
+        // 3. 【极简优化】：到期时间标签，仅在成功获取到时间后自动浮现，未连接前完全留白
+        if (_expireText.isNotEmpty)
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 10),
+            decoration: BoxDecoration(
+              color: const Color(0xFFF7F8FA),
+              borderRadius: BorderRadius.circular(999),
+            ),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                const Icon(Icons.access_time_rounded, size: 15, color: Color(0xFF888888)),
+                const SizedBox(width: 6),
+                Text(
+                  _expireText.replaceFirst("有效期至: ", "服务到期: "),
+                  style: const TextStyle(
+                    fontSize: 13, 
+                    fontWeight: FontWeight.w500, 
+                    color: Color(0xFF666666)
+                  ),
                 ),
-              ),
-            ],
+              ],
+            ),
           ),
-        ),
       ],
     );
   }
@@ -966,50 +965,56 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
                   ),
                 ),
               ),
-              const SizedBox(width: 12),
-              Expanded(
-                child: GestureDetector(
-                  onTap: _openRechargePage,
-                  child: Container(
-                    padding: const EdgeInsets.symmetric(vertical: 16),
-                    decoration: BoxDecoration(
-                      color: AppConfig.colorPrimary,
-                      borderRadius: BorderRadius.circular(16),
-                    ),
-                    alignment: Alignment.center,
-                    child: const Text(
-                      "立即充值", 
-                      style: TextStyle(
-                        fontSize: 14, 
-                        fontWeight: FontWeight.w600, 
-                        color: Colors.white,
-                        letterSpacing: 0.5, 
-                      )
+              // 【iOS适配改动】：如果是 iOS 系统，直接隐藏右侧的充值按钮，让左边的邀请领时长按钮独占全宽
+              if (!Platform.isIOS) ...[
+                const SizedBox(width: 12),
+                Expanded(
+                  child: GestureDetector(
+                    onTap: _openRechargePage,
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(vertical: 16),
+                      decoration: BoxDecoration(
+                        color: AppConfig.colorPrimary,
+                        borderRadius: BorderRadius.circular(16),
+                      ),
+                      alignment: Alignment.center,
+                      child: const Text(
+                        "立即充值", 
+                        // 【修复 Bug】：把原来的 AppConfig.colorPrimary 改为 Colors.white，文字就不会隐身了！
+                        style: TextStyle(
+                          fontSize: 14, 
+                          fontWeight: FontWeight.w600, 
+                          color: Colors.white,
+                          letterSpacing: 0.3,
+                        ),
+                      ),
                     ),
                   ),
                 ),
-              ),
+              ],
             ],
           ),
 
           const SizedBox(height: 16),
 
-          GestureDetector(
-            onTap: _showRechargeDialog,
-            behavior: HitTestBehavior.opaque,
-            child: const Padding(
-              padding: EdgeInsets.symmetric(vertical: 8),
-              child: Row(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  Icon(Icons.key_outlined, size: 14, color: Color(0xFF999999)),
-                  SizedBox(width: 6),
-                  Text("持有激活码？点击直接兑换", style: TextStyle(fontSize: 12, color: Color(0xFF999999))),
-                  Icon(Icons.keyboard_arrow_right_rounded, size: 14, color: Color(0xFF999999)),
-                ],
+          // 【iOS适配改动】：如果是 iOS 系统，把兑换卡密的文字入口一起隐藏掉，规避苹果审核风险
+          if (!Platform.isIOS)
+            GestureDetector(
+              onTap: _showRechargeDialog,
+              behavior: HitTestBehavior.opaque,
+              child: const Padding(
+                padding: EdgeInsets.symmetric(vertical: 8),
+                child: Row(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    Icon(Icons.key_outlined, size: 14, color: Color(0xFF999999)),
+                    SizedBox(width: 6),
+                    Text("持有激活码？点击直接兑换", style: TextStyle(fontSize: 12, color: Color(0xFF999999))),
+                    Icon(Icons.keyboard_arrow_right_rounded, size: 14, color: Color(0xFF999999)),
+                  ],
+                ),
               ),
             ),
-          ),
         ],
       ),
     );

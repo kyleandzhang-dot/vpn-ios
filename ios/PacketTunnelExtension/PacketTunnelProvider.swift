@@ -13,11 +13,20 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
 
     // 换成你自己的 App Group ID
     private let appGroup = "group.com.miaolian.myvpn"
-    
+
+    // 到期检测用：跟主 App(VpnTunnelPlugin) 约定好的 Darwin 通知名，
+    // 必须跟 VpnTunnelPlugin.swift 里监听的字符串完全一致，改一处两边都要改。
+    private let statusChangedDarwinNotification = "com.example.vpnAll.statusChanged"
+
     // 获取由 Keychain 永久持久化的设备唯一标识
     private var deviceId: String {
         return DeviceIdManager.getDeviceId()
     }
+
+    // 心跳定时器：隧道建立成功后启动，定期查一次账号是否到期
+    private var statusCheckTimer: DispatchSourceTimer?
+    // 从 Flutter 侧 connect() 传进来的 api_base_url，供心跳请求使用
+    private var apiBaseUrl: String = ""
 
     override func startTunnel(options: [String : NSObject]?, completionHandler: @escaping (Error?) -> Void) {
         // 打印出当前设备编号，证明底层 Extension 已经能成功从 Keychain 读取 ID
@@ -30,6 +39,10 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
               let nodeJson = conf["node_json"] as? String else {
             completionHandler(NSError(domain: "PacketTunnel", code: 1, userInfo: [NSLocalizedDescriptionKey: "缺少 node_json 配置"]))
             return
+        }
+        self.apiBaseUrl = conf["api_base_url"] as? String ?? ""
+        if self.apiBaseUrl.isEmpty {
+            NSLog("[Tunnel] 警告：未收到 api_base_url，到期心跳检测将不会启动 MARKER-V3")
         }
 
         do {
@@ -86,6 +99,7 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
                     NSLog("[Tunnel] === 即将调用 startOrReloadService，options 非空: %@ MARKER-V3 ===", overrideOptions)
                     try server.startOrReloadService(configJson, options: overrideOptions)
                     NSLog("[Tunnel] Libbox 服务启动成功！MARKER-V3")
+                    self.startStatusCheckTimer()
                     DispatchQueue.main.async {
                         completionHandler(nil)
                     }
@@ -103,6 +117,8 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
     }
 
     override func stopTunnel(with reason: NEProviderStopReason, completionHandler: @escaping () -> Void) {
+        statusCheckTimer?.cancel()
+        statusCheckTimer = nil
         do {
             try commandServer?.closeService()
         } catch {
@@ -177,10 +193,27 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
         return tunFd
     }
     
-    // MARK: - 原生心跳与鉴权辅助方法 (可选)
-    
-    /// 如果需要在 iOS 隧道进程里直接向服务器发心跳或检测是否到期，可以随时调用这个方法
-    /// 它直接使用当前 Keychain 中的 deviceId，不依赖 Flutter 前台
+    // MARK: - 原生心跳与鉴权
+
+    /// 隧道建立成功后启动，每隔一段时间查一次账号是否到期。
+    /// 之前这个函数写好了但没人调用，导致 iOS 端到期后永远不会自动断开——这里补上定时触发。
+    private func startStatusCheckTimer() {
+        guard !apiBaseUrl.isEmpty else { return }
+        statusCheckTimer?.cancel()
+
+        let interval: TimeInterval = 60 // 每60秒查一次，按需调整
+        let timer = DispatchSource.makeTimerSource(queue: .global(qos: .background))
+        timer.schedule(deadline: .now() + interval, repeating: interval)
+        timer.setEventHandler { [weak self] in
+            guard let self = self else { return }
+            self.checkUserStatus(apiBaseUrl: self.apiBaseUrl)
+        }
+        timer.resume()
+        statusCheckTimer = timer
+        NSLog("[Tunnel] 到期心跳检测已启动，间隔 %.0f 秒 MARKER-V3", interval)
+    }
+
+    /// 直接使用当前 Keychain 中的 deviceId，不依赖 Flutter 前台
     private func checkUserStatus(apiBaseUrl: String) {
         guard let url = URL(string: "\(apiBaseUrl)/api/v1/check_status") else { return }
         var request = URLRequest(url: url)
@@ -193,13 +226,38 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
         request.httpBody = try? JSONSerialization.data(withJSONObject: json)
         
         let task = URLSession.shared.dataTask(with: request) { [weak self] data, response, error in
+            guard let self = self else { return }
             if let httpRes = response as? HTTPURLResponse, httpRes.statusCode == 403 {
                 NSLog("[Tunnel] 心跳返回 403，账号服务已到期，正在自动断开连接...")
-                // 当后台隧道检测到到期时，直接主动断开隧道
-                self?.cancelTunnelWithError(NSError(domain: "PacketTunnel", code: 403, userInfo: [NSLocalizedDescriptionKey: "服务已到期"]))
+                // 关键修复：之前这里只断了隧道，从没告诉过主 App"是因为到期断的"，
+                // 所以 Flutter 侧只会收到普通的 disconnected，不会弹到期提示。
+                // 断开之前，先把 "EXPIRED" 写进 App Group 共享区，再发 Darwin 通知，
+                // 让主 App 的 VpnTunnelPlugin 读到之后往 EventChannel 发 "EXPIRED"。
+                self.notifyHostAppExpired()
+                self.statusCheckTimer?.cancel()
+                self.statusCheckTimer = nil
+                self.cancelTunnelWithError(NSError(domain: "PacketTunnel", code: 403, userInfo: [NSLocalizedDescriptionKey: "服务已到期"]))
             }
         }
         task.resume()
+    }
+
+    /// 把到期状态写进 App Group 共享 UserDefaults，并发 Darwin 通知唤醒主 App 读取。
+    /// Extension 进程和主 App 进程是隔离的，MethodChannel/EventChannel 在这里用不了，
+    /// 只能靠 App Group + Darwin 通知这条路传消息。
+    private func notifyHostAppExpired() {
+        guard let defaults = UserDefaults(suiteName: appGroup) else {
+            NSLog("[Tunnel] 无法打开 App Group 共享 UserDefaults：%@", appGroup)
+            return
+        }
+        defaults.set("EXPIRED", forKey: "vpn_status")
+
+        CFNotificationCenterPostNotification(
+            CFNotificationCenterGetDarwinNotifyCenter(),
+            CFNotificationName(statusChangedDarwinNotification as CFString),
+            nil, nil, true
+        )
+        NSLog("[Tunnel] 已写入 EXPIRED 状态并发出 Darwin 通知 MARKER-V3")
     }
 }
 

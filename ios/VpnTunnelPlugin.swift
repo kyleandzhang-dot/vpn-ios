@@ -9,8 +9,13 @@ public class VpnTunnelPlugin: NSObject, FlutterPlugin, FlutterStreamHandler {
 
     private var eventSink: FlutterEventSink?
     private var manager: NETunnelProviderManager?
-    private let appGroup = "group.com.miaolian.myvpn" // 跟 AppDelegate / Extension 里保持一致
-    private let providerBundleId = "com.miaolian.myvpn.PacketTunnelExtension" // 必须跟 Extension target 的真实 Bundle Identifier 完全一致
+    // 【修复 Bug】：之前这里写的是 "group.com.example.vpnAll"，跟
+    // PacketTunnelProvider.swift / AppDelegate.swift 里实际用的
+    // "group.com.miaolian.myvpn" 不是同一个 App Group —— Extension 写的
+    // EXPIRED 状态，主 App 这边永远读的是另一个容器，读不到。这是 iOS 端
+    // 到期后不弹通知的直接原因之一，改成跟 Extension 一致。
+    private let appGroup = "group.com.miaolian.myvpn"
+    private let providerBundleId = "com.miaolian.myvpn.PacketTunnelExtension" // 要跟 Extension target 的 Bundle Identifier 一致
 
     public static func register(with registrar: FlutterPluginRegistrar) {
         let instance = VpnTunnelPlugin()
@@ -38,13 +43,11 @@ public class VpnTunnelPlugin: NSObject, FlutterPlugin, FlutterStreamHandler {
                 result(FlutterError(code: "BAD_ARGS", message: "缺少 node_json", details: nil))
                 return
             }
-            connect(nodeJson: nodeJson, result: result)
+            // api_base_url 透传给 Extension，供它自己起心跳查到期状态用
+            let apiBaseUrl = args["api_base_url"] as? String ?? ""
+            connect(nodeJson: nodeJson, apiBaseUrl: apiBaseUrl, result: result)
         case "disconnect":
             disconnect(result: result)
-        case "getDeviceId":
-            // 跟 PacketTunnelProvider 里用的是同一个 DeviceIdManager，
-            // 保证主 App 和 Extension 拿到的是同一个设备号
-            result(DeviceIdManager.getDeviceId())
         default:
             result(FlutterMethodNotImplemented)
         }
@@ -52,7 +55,7 @@ public class VpnTunnelPlugin: NSObject, FlutterPlugin, FlutterStreamHandler {
 
     // MARK: - connect / disconnect
 
-    private func connect(nodeJson: String, result: @escaping FlutterResult) {
+    private func connect(nodeJson: String, apiBaseUrl: String, result: @escaping FlutterResult) {
         loadOrCreateManager { [weak self] manager, error in
             guard let self = self, let manager = manager else {
                 result(FlutterError(code: "MANAGER_ERR", message: error?.localizedDescription, details: nil))
@@ -62,10 +65,10 @@ public class VpnTunnelPlugin: NSObject, FlutterPlugin, FlutterStreamHandler {
             let proto = NETunnelProviderProtocol()
             proto.providerBundleIdentifier = self.providerBundleId
             proto.serverAddress = "miaolian-vpn" // 随便填一个非空标识即可,系统不关心内容
-            proto.providerConfiguration = ["node_json": nodeJson]
+            proto.providerConfiguration = ["node_json": nodeJson, "api_base_url": apiBaseUrl]
 
             manager.protocolConfiguration = proto
-            manager.localizedDescription = "喵脸VPN"
+            manager.localizedDescription = "喵脸"
             manager.isEnabled = true
 
             manager.saveToPreferences { saveError in
