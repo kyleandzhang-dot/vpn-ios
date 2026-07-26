@@ -9,19 +9,17 @@ public class VpnTunnelPlugin: NSObject, FlutterPlugin, FlutterStreamHandler {
 
     private var eventSink: FlutterEventSink?
     private var manager: NETunnelProviderManager?
-    // 根据 Apple Developer 后台 Identifiers 列表核实：主 App ID 是
-    // com.miaolian.myvpn，Extension 的 Bundle ID 必须以主 App ID 为前缀，
-    // 后台里唯一合法的就是 com.miaolian.myvpn.PacketTunnelExtension。
-    // "com.example.vpnAll.PacketTunnel" 在开发者后台里根本没注册过，是
-    // 模板占位符，绝对不能用，用了系统就找不到 Extension，报
-    // "The VPN app used by the VPN configuration is not installed"。
-    // appGroup 待确认：后台注册了 group.com.miaolian / group.com.miaolian.myvpn /
-    // group.com.miaolian.myvpn.shared 三个，需要去 Xcode 里 Runner 和
-    // Extension 两个 target 的 Signing & Capabilities -> App Groups 里
-    // 核对实际打钩的是哪一个，两边必须一致。下面先按目前已知信息填最像的一个，
-    // 务必去 Xcode 核实后再改。
-    private let appGroup = "group.com.miaolian.myvpn"
-    private let providerBundleId = "com.miaolian.myvpn.PacketTunnelExtension"
+    // 【排除测试】：换回旧代码里的值做对照测试。注意：开发者后台的
+    // Identifiers 列表里查不到 com.example.vpnAll.PacketTunnel 这个注册项，
+    // 且上次用 com.miaolian.myvpn.PacketTunnelExtension（后台唯一合法值）
+    // 测试时报的是同一句 "The VPN app used by the VPN configuration is
+    // not installed"——两个不同 ID 报同一个错，大概率说明问题不在这串
+    // 字符串本身，而是 Extension 没有被 Embed & Sign 进包里，或者
+    // Provisioning Profile / Network Extension entitlement 没配好。
+    // 这里改回旧值只是用来排除"是不是字符串问题"，如果还报同样的错，
+    // 就该去查 Xcode 里 Embed & Sign 和 Signing & Capabilities 了。
+    private let appGroup = "group.com.example.vpnAll"
+    private let providerBundleId = "com.example.vpnAll.PacketTunnel"
 
     public static func register(with registrar: FlutterPluginRegistrar) {
         let instance = VpnTunnelPlugin()
