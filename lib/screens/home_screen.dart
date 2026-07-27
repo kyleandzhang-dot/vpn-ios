@@ -1028,19 +1028,18 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
             padding: const EdgeInsets.only(top: 2),
             child: Row(
               children: [
-                if (!Platform.isIOS)
-                  GestureDetector(
-                    onTap: _shareNativeLog,
-                    child: Container(
-                      margin: const EdgeInsets.only(right: 12),
-                      padding: const EdgeInsets.all(10),
-                      decoration: const BoxDecoration(
-                        color: Color(0xFFF2F3F5), 
-                        shape: BoxShape.circle, 
-                      ),
-                      child: const Icon(Icons.bug_report_outlined, size: 20, color: Colors.black87),
+                GestureDetector(
+                  onTap: _shareNativeLog,
+                  child: Container(
+                    margin: const EdgeInsets.only(right: 12),
+                    padding: const EdgeInsets.all(10),
+                    decoration: const BoxDecoration(
+                      color: Color(0xFFF2F3F5), 
+                      shape: BoxShape.circle, 
                     ),
+                    child: const Icon(Icons.bug_report_outlined, size: 20, color: Colors.black87),
                   ),
+                ),
                 GestureDetector(
                   onTap: _onNoticeIconTap,
                   child: Container(

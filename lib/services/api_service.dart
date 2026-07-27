@@ -11,6 +11,12 @@ import 'vpn_bridge.dart';
 class ApiService {
   static const _androidIdPlugin = AndroidId();
 
+  // 兜底 UUID 只存内存，不落盘：同一次 App 运行内保持稳定（保证这次运行里
+  // get_node/checkin/recharge 用的是同一个值），但不会跨进程/跨启动永久锁死。
+  // 下次冷启动会重新尝试拿真实设备号，真实设备号一旦拿到就会正常存进
+  // SharedPreferences 永久缓存，不会每次都变。
+  static String? _sessionFallbackId;
+
   static Future<String> getDeviceId() async {
     final prefs = await SharedPreferences.getInstance();
     String? deviceId = prefs.getString('device_uuid');
@@ -51,15 +57,23 @@ class ApiService {
     // - "0000000000000000"：模拟器或部分设备上 ANDROID_ID 的默认空值
     // - "9774D56D682E549C"：老版本安卓(2.2及以前)在特定条件下所有设备共享的经典默认值
     const invalidIds = {"0000000000000000", "9774D56D682E549C"};
-    if (deviceId == null ||
-        deviceId.isEmpty ||
-        invalidIds.contains(deviceId.toUpperCase())) {
-      // 兜底：生成真正随机的 UUID，并去掉横杠、转大写，跟正常设备号格式保持一致
-      deviceId = const Uuid().v4().replaceAll('-', '').toUpperCase();
+    final gotValidId = deviceId != null &&
+        deviceId.isNotEmpty &&
+        !invalidIds.contains(deviceId.toUpperCase());
+
+    if (gotValidId) {
+      // 拿到真实、有效的设备号：正常永久缓存，下次直接复用。
+      await prefs.setString('device_uuid', deviceId!);
+      return deviceId;
     }
 
-    await prefs.setString('device_uuid', deviceId);
-    return deviceId;
+    // 拿不到真实设备号：只生成一个"这次运行"用的随机 UUID，绝不写进
+    // SharedPreferences——避免某次冷启动插件读取抖动/环境异常导致的
+    // 随机值被永久当成"设备身份"钉死，跟心跳检测、以及以后能正常
+    // 读到的真实设备号对不上，进而出现"账号明明有时长却被判定过期"的问题。
+    // 下次冷启动会重新走一遍上面的真实设备号获取逻辑。
+    _sessionFallbackId ??= const Uuid().v4().replaceAll('-', '').toUpperCase();
+    return _sessionFallbackId!;
   }
 
   static Future<Map<String, dynamic>> fetchConfig() async {
