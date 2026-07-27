@@ -22,7 +22,21 @@ class DeviceIdManager {
     static func getDeviceId() -> String {
         // 1. 尝试从共享 Keychain 读取已有 ID
         if let existingId = readFromKeychain(key: keychainKey) {
-            return existingId
+            // ⚠️ 迁移修复：下面"去横杠+转大写"的规则是后加的。
+            // 在这个规则上线之前就已经装过 App 的设备，Keychain 里存的还是
+            // 老的、带横杠的原始值——之前这里读到就直接原样 return，
+            // 永远不会再走到下面的格式化逻辑，导致这批老设备的心跳请求一直
+            // 带着横杠去查后端，跟"去横杠"格式注册的账号对不上，永远 404。
+            // 这里补一次归一化：如果读出来的值不是"去横杠+全大写"格式，
+            // 就地纠正一次并回写 Keychain，之后就跟新设备生成的格式一致了。
+            let normalizedId = existingId
+                .replacingOccurrences(of: "-", with: "")
+                .uppercased()
+            if normalizedId != existingId {
+                NSLog("[DeviceIdManager] 检测到旧格式(带横杠)的设备号，迁移为统一格式")
+                saveToKeychain(key: keychainKey, value: normalizedId)
+            }
+            return normalizedId
         }
 
         // 2. 如果 Keychain 没有，先拿系统的 IDFV，拿不到就保底生成一个 UUID

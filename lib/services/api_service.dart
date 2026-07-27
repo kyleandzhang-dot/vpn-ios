@@ -29,9 +29,9 @@ class ApiService {
         // device_info_plus 的 AndroidDeviceInfo 里没有 androidId 字段，
         // 它的 .id 对应的是 Build.ID（固件版本号），不是设备唯一标识。
         // 真正的 Settings.Secure.ANDROID_ID 需要用专门的 android_id 插件获取。
-        deviceId = (await _androidIdPlugin.getId())
-            ?.replaceAll('-', '')
-            .toUpperCase();
+        // 直接用插件返回的原始值，不在这里再做一遍格式化——原生返回什么
+        // 格式，就是最终格式，避免这一层和原生各自处理导致后续对不上。
+        deviceId = await _androidIdPlugin.getId();
       } else if (Platform.isIOS) {
         // 不再用 identifierForVendor：那个值只在主 App 进程里生成/缓存，
         // 跟 Network Extension（PacketTunnelProvider）里 DeviceIdManager
@@ -45,15 +45,16 @@ class ApiService {
         // 加个 5 秒超时兜底，超时就当作取不到原生 ID，走后面的 UUID 兜底逻辑。
         final nativeId = await VpnBridge.getDeviceId()
             .timeout(const Duration(seconds: 5), onTimeout: () => '');
-        deviceId = nativeId.isNotEmpty
-            ? nativeId.replaceAll('-', '').toUpperCase()
-            : null;
+        // 格式（去横杠/大小写）完全由 DeviceIdManager.swift 这一处权威来源决定，
+        // 这里不再重复 replaceAll/toUpperCase——原生给什么就用什么，避免
+        // 两边各自处理一遍、以后有一边改了格式却忘了同步改另一边。
+        deviceId = nativeId.isNotEmpty ? nativeId : null;
       }
     } catch (_) {
       deviceId = null;
     }
 
-    // 过滤已知的坏值/空值：
+    // 过滤已知的坏值/空值（大小写不敏感比较，但不改动 deviceId 本身）：
     // - "0000000000000000"：模拟器或部分设备上 ANDROID_ID 的默认空值
     // - "9774D56D682E549C"：老版本安卓(2.2及以前)在特定条件下所有设备共享的经典默认值
     const invalidIds = {"0000000000000000", "9774D56D682E549C"};
