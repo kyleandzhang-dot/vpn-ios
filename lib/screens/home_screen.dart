@@ -124,12 +124,14 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
         _ringAnimController.stop();
         _showToast("时长不足");
         // 安卓侧 CustomVpnService 的心跳检测到403时，已经用原生 NotificationManager
-        // 弹过一次「服务已到期」的系统通知了（见 showExpiredNotification()），
-        // 这里如果再弹一次 flutter_local_notifications 会导致安卓上重复弹两条。
-        // iOS 目前没有等价的原生到期检测逻辑，所以只在 iOS 上补这一条。
-        if (Platform.isIOS) {
-          NotificationService.showExpiredNow();
-        } else {
+        // 弹过一次「服务已到期」的系统通知了（见 showExpiredNotification()）。
+        // iOS 侧 PacketTunnelProvider 现在也一样，心跳检测到403/404时会直接调
+        // UNUserNotificationCenter 弹一条本地通知（见 showExpiredLocalNotification），
+        // 不再依赖主 App 存活/在前台。这里如果还调 NotificationService.showExpiredNow()，
+        // 只要 App 恰好在前台/未被系统挂起，就会跟原生那条重复弹出两条通知
+        // （两边 identifier 不一样，系统不会互相去重）。所以两端都不需要在这里
+        // 额外弹通知了，只保留跳转充值页。
+        if (!Platform.isIOS) {
           _openRechargePage();
         }
         break;

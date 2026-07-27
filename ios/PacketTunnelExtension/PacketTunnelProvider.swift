@@ -3,6 +3,7 @@ import NetworkExtension
 import Libbox
 import Darwin
 import Network
+import UserNotifications
 
 class PacketTunnelProvider: NEPacketTunnelProvider {
 
@@ -270,7 +271,7 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
                 // 所以 Flutter 侧只会收到普通的 disconnected，不会弹到期提示。
                 // 断开之前，先把 "EXPIRED" 写进 App Group 共享区，再发 Darwin 通知，
                 // 让主 App 的 VpnTunnelPlugin 读到之后往 EventChannel 发 "EXPIRED"。
-                self.notifyHostAppExpired()
+                self.notifyHostAppExpired(message: "您的加速服务已过期，已为您断开连接，点击立即续费")
                 self.statusCheckTimer?.cancel()
                 self.statusCheckTimer = nil
                 self.cancelTunnelWithError(NSError(domain: "PacketTunnel", code: 403, userInfo: [NSLocalizedDescriptionKey: "服务已到期"]))
@@ -279,7 +280,7 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
                 // 保留这个处理只是为了兜底：万一后端确实查不到这个 device_id
                 // (比如账号被后台删除)，也应该断开，而不是放着不管、一直空转心跳。
                 NSLog("[Tunnel] 心跳返回 404，用户不存在，正在自动断开连接...")
-                self.notifyHostAppExpired()
+                self.notifyHostAppExpired(message: "账号异常，已为您断开连接，请重新打开 App 检查")
                 self.statusCheckTimer?.cancel()
                 self.statusCheckTimer = nil
                 self.cancelTunnelWithError(NSError(domain: "PacketTunnel", code: 404, userInfo: [NSLocalizedDescriptionKey: "用户不存在"]))
@@ -288,10 +289,13 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
         task.resume()
     }
 
-    /// 把到期状态写进 App Group 共享 UserDefaults，并发 Darwin 通知唤醒主 App 读取。
+    /// 把到期状态写进 App Group 共享 UserDefaults，并发 Darwin 通知唤醒主 App 读取，
+    /// 同时 Extension 自己也直接弹一条本地通知。
     /// Extension 进程和主 App 进程是隔离的，MethodChannel/EventChannel 在这里用不了，
-    /// 只能靠 App Group + Darwin 通知这条路传消息。
-    private func notifyHostAppExpired() {
+    /// 只能靠 App Group + Darwin 通知这条路传消息给主 App；但主 App 在后台会被系统
+    /// 挂起，光靠这条路用户在后台可能完全收不到提示，所以下面额外加了一步：
+    /// 不依赖主 App 是否存活，Extension 自己直接调 UNUserNotificationCenter 弹通知。
+    private func notifyHostAppExpired(message: String) {
         guard let defaults = UserDefaults(suiteName: appGroup) else {
             NSLog("[Tunnel] 无法打开 App Group 共享 UserDefaults：%@", appGroup)
             return
@@ -304,6 +308,35 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
             nil, nil, true
         )
         NSLog("[Tunnel] 已写入 EXPIRED 状态并发出 Darwin 通知 MARKER-V3")
+
+        showExpiredLocalNotification(message: message)
+    }
+
+    /// 直接从 Extension 进程弹一条系统本地通知，不依赖主 App 是否存活/在前台。
+    /// 主 App 在后台会被系统挂起，之前只发 Darwin 通知 + 写 App Group，全指望
+    /// 挂起的主 App 醒来处理，导致 App 长时间在后台时用户完全收不到到期提醒。
+    /// Extension 进程只要隧道还连着就是活的，比主 App 更"扛得住"，所以到期这一刻
+    /// 由 Extension 自己直接弹通知最可靠——不管主 App 前台/后台/被挂起都能弹出来。
+    /// ⚠️ 通知权限是跟主 App 共用的（同一个 Team ID + 主 Bundle ID 下的授权状态），
+    /// 只要用户在主 App 里同意过通知权限，这里不需要 Extension 单独再申请一次。
+    private func showExpiredLocalNotification(message: String) {
+        let content = UNMutableNotificationContent()
+        content.title = "服务已到期"
+        content.body = message
+        content.sound = .default
+
+        let request = UNNotificationRequest(
+            identifier: "vpn_expired_notification",
+            content: content,
+            trigger: nil // nil = 立即触发，不延迟
+        )
+        UNUserNotificationCenter.current().add(request) { error in
+            if let error = error {
+                NSLog("[Tunnel] Extension 直接弹本地通知失败: %@ MARKER-V3", error.localizedDescription)
+            } else {
+                NSLog("[Tunnel] Extension 已直接弹出到期本地通知 MARKER-V3")
+            }
+        }
     }
 }
 
