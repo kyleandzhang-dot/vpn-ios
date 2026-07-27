@@ -1,6 +1,6 @@
 name: my_vpn_app
 description: 喵脸 VPN 
-version: 1.0.0+124
+version: 1.0.0+122
 
 environment:
   sdk: '>=3.0.0 <4.0.0'
@@ -41,6 +41,6 @@ flutter:
   # 3. 开启 assets 资源加载声明
   # 这里声明的是"文件夹"，该文件夹下所有文件都会被自动打包进App，
   # 不需要每加一张图就手动加一行。把图标文件放进 assets/ 目录下即可。
-  
+
   assets:
     - assets/
