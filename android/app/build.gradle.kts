@@ -1,7 +1,17 @@
+import java.util.Properties
+import java.io.FileInputStream
+
 plugins {
     id("com.android.application")
     id("kotlin-android")
     id("dev.flutter.flutter-gradle-plugin")
+}
+
+// 读取签名配置
+val keystoreProperties = Properties()
+val keystorePropertiesFile = rootProject.file("key.properties")
+if (keystorePropertiesFile.exists()) {
+    keystoreProperties.load(FileInputStream(keystorePropertiesFile))
 }
 
 android {
@@ -26,22 +36,33 @@ android {
         versionCode = flutter.versionCode
         versionName = flutter.versionName
 
-        // 统一在这里控制架构，debug/release 不再单独覆盖
-        // 真机发布只需要 arm64-v8a；如需模拟器调试，临时加上 x86_64
         ndk {
             abiFilters += listOf("arm64-v8a")
-            // 调试时如需模拟器支持，改成：
-            // abiFilters += listOf("arm64-v8a", "x86_64")
         }
 
         buildConfigField("String", "API_BASE_URL", "\"https://shop.jmsht.one\"")
+    }
+
+    signingConfigs {
+        create("release") {
+            if (keystorePropertiesFile.exists()) {
+                storeFile = rootProject.file(keystoreProperties["storeFile"] as String)
+                storePassword = keystoreProperties["storePassword"] as String
+                keyAlias = keystoreProperties["keyAlias"] as String
+                keyPassword = keystoreProperties["keyPassword"] as String
+            }
+        }
     }
 
     buildFeatures {
         buildConfig = true
     }
 
-    // 不再需要 buildTypes 里的 ndk 块，删除即可
+    buildTypes {
+        release {
+            signingConfig = signingConfigs.getByName("release")
+        }
+    }
 }
 
 flutter {
