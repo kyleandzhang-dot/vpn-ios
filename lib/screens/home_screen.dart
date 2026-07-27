@@ -39,6 +39,7 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
   String _cfgAnnouncement = "";
   String _cfgAnnouncementTitle = "公告";
   bool _showNoticeDot = false;
+  bool _isFetchingAnnouncement = false; // 点铃铛图标手动刷新公告时的防抖标记，避免连续点击并发发多个请求
   String _uid = "";
   bool _uidFetchFailed = false; // 重试一次仍失败后置 true，UI 提示可点击重试
 
@@ -480,6 +481,28 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
       debugPrint('[Notice] 打开公告链接失败: $e');
       if (mounted) _showToast("打开链接失败");
     }
+  }
+
+  /// 点铃铛图标手动查看公告。之前直接复用 App 启动时缓存的 _cfgAnnouncement，
+  /// 公告后台更新了但用户没重启 App 的话，点开看到的还是旧内容。
+  /// 改成点击时先重新请求一次 /api/v1/config，拿到最新公告内容再弹窗；
+  /// 请求失败就还是用手头缓存的内容弹（不阻塞用户查看，只是可能不是最新的）。
+  Future<void> _onNoticeIconTap() async {
+    if (_isFetchingAnnouncement) return;
+    _isFetchingAnnouncement = true;
+
+    final cfgData = await ApiService.fetchConfig();
+    if (cfgData.isNotEmpty && cfgData['data'] != null && mounted) {
+      final cfg = cfgData['data'];
+      setState(() {
+        _cfgBuyQQ = cfg['buy_qq'] ?? _cfgBuyQQ;
+        _cfgAnnouncement = cfg['announcement'] ?? _cfgAnnouncement;
+        _cfgAnnouncementTitle = cfg['announcement_title'] ?? _cfgAnnouncementTitle;
+      });
+    }
+
+    _isFetchingAnnouncement = false;
+    if (mounted) _showNoticeDialog();
   }
 
   void _showNoticeDialog() {
@@ -1001,22 +1024,22 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
             padding: const EdgeInsets.only(top: 2),
             child: Row(
               children: [
-                // 暂时在 iOS 下隐藏导出日志按钮
-                if (!Platform.isIOS)
-                  GestureDetector(
-                    onTap: _shareNativeLog,
-                    child: Container(
-                      margin: const EdgeInsets.only(right: 12),
-                      padding: const EdgeInsets.all(10),
-                      decoration: const BoxDecoration(
-                        color: Color(0xFFF2F3F5), 
-                        shape: BoxShape.circle, 
-                      ),
-                      child: const Icon(Icons.bug_report_outlined, size: 20, color: Colors.black87),
-                    ),
-                  ),
+                // 暂时隐藏右上角的日志导出按钮（iOS 和 Android 均隐藏）
+                // if (!Platform.isIOS)
+                //   GestureDetector(
+                //     onTap: _shareNativeLog,
+                //     child: Container(
+                //       margin: const EdgeInsets.only(right: 12),
+                //       padding: const EdgeInsets.all(10),
+                //       decoration: const BoxDecoration(
+                //         color: Color(0xFFF2F3F5), 
+                //         shape: BoxShape.circle, 
+                //       ),
+                //       child: const Icon(Icons.bug_report_outlined, size: 20, color: Colors.black87),
+                //     ),
+                //   ),
                 GestureDetector(
-                  onTap: _showNoticeDialog,
+                  onTap: _onNoticeIconTap,
                   child: Container(
                     margin: const EdgeInsets.only(right: 12),
                     padding: const EdgeInsets.all(10),
@@ -1145,7 +1168,8 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
       displayUid = "获取中...";
     }
     return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 14),
+      // 【优化】：顶部留白仅 4px（与上文衔接），底部留白 14px（给屏幕底边留出呼吸感）
+      padding: const EdgeInsets.only(top: 4, bottom: 14),
       child: GestureDetector(
         onTap: () => _copyUid(),
         behavior: HitTestBehavior.opaque,
@@ -1155,13 +1179,13 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
             Text(
               "UID: $displayUid",
               style: const TextStyle(
-                fontSize: 13, 
-                color: Color(0xFF888888),
+                fontSize: 12, // 【优化】：将 13 改为 12，与上方的激活码字号一致，更协调
+                color: Color(0xFF999999),
                 fontWeight: FontWeight.w500,
               ),
             ),
             const SizedBox(width: 4),
-            const Icon(Icons.copy_rounded, size: 14, color: Color(0xFF888888)),
+            const Icon(Icons.copy_rounded, size: 13, color: Color(0xFF999999)),
           ],
         ),
       ),
@@ -1191,7 +1215,8 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
     }
 
     return Padding(
-      padding: const EdgeInsets.fromLTRB(24, 0, 24, 16),
+      // 【优化】：底部内边距从 16 改为 2
+      padding: const EdgeInsets.fromLTRB(24, 0, 24, 2),
       child: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
@@ -1254,19 +1279,20 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
             ],
           ),
 
-          const SizedBox(height: 16),
+          const SizedBox(height: 12), // 【优化】：由 16 微调为 12，拉近按钮与激活码提示的距离
 
           if (!Platform.isIOS)
             GestureDetector(
               onTap: _showRechargeDialog,
               behavior: HitTestBehavior.opaque,
               child: const Padding(
-                padding: EdgeInsets.symmetric(vertical: 8),
+                // 【优化】：上下 Padding 从 8 收紧为 4
+                padding: EdgeInsets.symmetric(vertical: 4),
                 child: Row(
                   mainAxisAlignment: MainAxisAlignment.center,
                   children: [
                     Icon(Icons.key_outlined, size: 14, color: Color(0xFF999999)),
-                    SizedBox(width: 6),
+                    SizedBox(width: 4),
                     Text("持有激活码？点击直接兑换", style: TextStyle(fontSize: 12, color: Color(0xFF999999))),
                     Icon(Icons.keyboard_arrow_right_rounded, size: 14, color: Color(0xFF999999)),
                   ],
