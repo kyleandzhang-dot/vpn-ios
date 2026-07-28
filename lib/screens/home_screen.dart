@@ -40,6 +40,10 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
   String _cfgAnnouncementTitle = "公告";
   bool _showNoticeDot = false;
   bool _isFetchingAnnouncement = false; // 点铃铛图标手动刷新公告时的防抖标记，避免连续点击并发发多个请求
+  // 公告弹窗打开后，如果后台请求回来发现内容有更新，需要在不关闭弹窗的情况下
+  // 原地刷新弹窗里的文字——用 StatefulBuilder 的 setState 存一下引用，弹窗关闭后置空
+  void Function(void Function())? _noticeDialogSetState;
+  bool _noticeDialogLoading = false;
   String _uid = "";
   bool _uidFetchFailed = false; // 重试一次仍失败后置 true，UI 提示可点击重试
 
@@ -493,84 +497,113 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
     if (_isFetchingAnnouncement) return;
     _isFetchingAnnouncement = true;
 
+    // 先用手头缓存的公告内容立刻弹出弹窗（没有缓存就弹窗里显示加载中），
+    // 不再让用户点了之后干等请求结果，误以为没点上
+    _showNoticeDialog(loading: _cfgAnnouncement.isEmpty);
+
     final cfgData = await ApiService.fetchConfig();
     if (cfgData.isNotEmpty && cfgData['data'] != null && mounted) {
       final cfg = cfgData['data'];
-      setState(() {
-        _cfgBuyQQ = cfg['buy_qq'] ?? _cfgBuyQQ;
-        _cfgAnnouncement = cfg['announcement'] ?? _cfgAnnouncement;
-        _cfgAnnouncementTitle = cfg['announcement_title'] ?? _cfgAnnouncementTitle;
-      });
+      _cfgBuyQQ = cfg['buy_qq'] ?? _cfgBuyQQ;
+      _cfgAnnouncement = cfg['announcement'] ?? _cfgAnnouncement;
+      _cfgAnnouncementTitle = cfg['announcement_title'] ?? _cfgAnnouncementTitle;
     }
 
     _isFetchingAnnouncement = false;
-    if (mounted) _showNoticeDialog();
+    // 弹窗还开着的话，原地刷新成最新内容；弹窗已经被用户关掉了就不用管了
+    _noticeDialogSetState?.call(() => _noticeDialogLoading = false);
   }
 
-  void _showNoticeDialog() {
+  void _showNoticeDialog({bool loading = false}) {
     _isDialogActive = true;
+    _noticeDialogLoading = loading;
     showDialog(
       context: context,
-      builder: (_) => Dialog(
-        backgroundColor: Colors.white, 
-        elevation: 0,
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
-        child: Padding(
-          padding: const EdgeInsets.fromLTRB(28, 28, 28, 24),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(
-                _cfgAnnouncement.isNotEmpty ? _cfgAnnouncementTitle : "公告",
-                style: const TextStyle(
-                  fontSize: 18,
-                  fontWeight: FontWeight.w700, 
-                  color: Colors.black87,
-                  letterSpacing: 0.5, 
-                ),
+      builder: (_) => StatefulBuilder(
+        builder: (context, setDialogState) {
+          // 存一下这个弹窗自己的 setState，外部请求回来后就能原地刷新它，不用关了重开
+          _noticeDialogSetState = setDialogState;
+          return Dialog(
+            backgroundColor: Colors.white,
+            elevation: 0,
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
+            child: Padding(
+              padding: const EdgeInsets.fromLTRB(28, 28, 28, 24),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    _cfgAnnouncement.isNotEmpty ? _cfgAnnouncementTitle : "公告",
+                    style: const TextStyle(
+                      fontSize: 18,
+                      fontWeight: FontWeight.w700,
+                      color: Colors.black87,
+                      letterSpacing: 0.5,
+                    ),
+                  ),
+                  const SizedBox(height: 16),
+                  // 手头完全没缓存内容、还在等第一次请求结果时，显示加载中而不是
+                  // 直接说「暂无公告」，避免让用户误以为真的没有公告
+                  if (_noticeDialogLoading && _cfgAnnouncement.isEmpty)
+                    const Padding(
+                      padding: EdgeInsets.symmetric(vertical: 24),
+                      child: Center(
+                        child: SizedBox(
+                          width: 22,
+                          height: 22,
+                          child: CircularProgressIndicator(strokeWidth: 2),
+                        ),
+                      ),
+                    )
+                  else
+                    SelectableText.rich(
+                      TextSpan(
+                        style: const TextStyle(
+                          fontSize: 14,
+                          color: Color(0xFF666666),
+                          height: 1.6,
+                        ),
+                        children: _cfgAnnouncement.isNotEmpty
+                            ? _buildAnnouncementSpans(_cfgAnnouncement)
+                            : const [TextSpan(text: "暂无公告")],
+                      ),
+                    ),
+                  const SizedBox(height: 32),
+                  SizedBox(
+                    width: double.infinity,
+                    child: ElevatedButton(
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: AppConfig.colorPrimary,
+                        foregroundColor: Colors.white,
+                        elevation: 0,
+                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+                        padding: const EdgeInsets.symmetric(vertical: 14),
+                      ),
+                      onPressed: () {
+                        Navigator.pop(context);
+                        _isDialogActive = false;
+                        _noticeDialogSetState = null;
+                        _markAnnouncementRead();
+                        _maybeShowPendingCheckinPopup();
+                      },
+                      child: const Text(
+                        "我知道了",
+                        style: TextStyle(fontSize: 15, fontWeight: FontWeight.w600),
+                      ),
+                    ),
+                  )
+                ],
               ),
-              const SizedBox(height: 16),
-              SelectableText.rich(
-                TextSpan(
-                  style: const TextStyle(
-                    fontSize: 14,
-                    color: Color(0xFF666666),
-                    height: 1.6,
-                  ),
-                  children: _cfgAnnouncement.isNotEmpty
-                      ? _buildAnnouncementSpans(_cfgAnnouncement)
-                      : const [TextSpan(text: "暂无公告")],
-                ),
-              ),
-              const SizedBox(height: 32),
-              SizedBox(
-                width: double.infinity,
-                child: ElevatedButton(
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: AppConfig.colorPrimary,
-                    foregroundColor: Colors.white,
-                    elevation: 0,
-                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
-                    padding: const EdgeInsets.symmetric(vertical: 14),
-                  ),
-                  onPressed: () {
-                    Navigator.pop(context);
-                    _isDialogActive = false;
-                    _markAnnouncementRead();
-                    _maybeShowPendingCheckinPopup();
-                  },
-                  child: const Text(
-                    "我知道了",
-                    style: TextStyle(fontSize: 15, fontWeight: FontWeight.w600),
-                  ),
-                ),
-              )
-            ],
-          ),
-        ),
-      )
-    );
+            ),
+          );
+        },
+      ),
+    ).then((_) {
+      // 用户直接点空白处/返回键关掉弹窗（没走上面按钮的 onPressed）时，也要清一下引用
+      _isDialogActive = false;
+      _noticeDialogSetState = null;
+    });
   }
 
   void _showRechargeDialog() {

@@ -254,7 +254,7 @@ jobs:
                               <key>kind</key>
                               <string>software-package</string>
                               <key>url</key>
-                              <string>${{ vars.R2_PUBLIC_URL }}/ios%20app/${{ steps.build_info.outputs.ipa_name }}</string>
+                              <string>${{ vars.R2_PUBLIC_URL }}/ios-app/${{ steps.build_info.outputs.ipa_name }}</string>
                           </dict>
                       </array>
                       <key>metadata</key>
@@ -288,18 +288,18 @@ jobs:
           ENDPOINT="https://${{ secrets.R2_ACCOUNT_ID }}.r2.cloudflarestorage.com"
 
           aws s3 cp ios/Runner.ipa \
-            "s3://${{ secrets.R2_BUCKET }}/ios app/${{ steps.build_info.outputs.ipa_name }}" \
+            "s3://${{ secrets.R2_BUCKET }}/ios-app/${{ steps.build_info.outputs.ipa_name }}" \
             --endpoint-url "$ENDPOINT" \
             --content-type "application/octet-stream"
 
           aws s3 cp manifest.plist \
-            "s3://${{ secrets.R2_BUCKET }}/ios app/manifest-${{ steps.build_info.outputs.build_time }}.plist" \
+            "s3://${{ secrets.R2_BUCKET }}/ios-app/manifest-${{ steps.build_info.outputs.build_time }}.plist" \
             --endpoint-url "$ENDPOINT" \
             --content-type "application/xml"
 
       - name: Print install link
         run: |
-          MANIFEST_URL="${{ vars.R2_PUBLIC_URL }}/ios%20app/manifest-${{ steps.build_info.outputs.build_time }}.plist"
+          MANIFEST_URL="${{ vars.R2_PUBLIC_URL }}/ios-app/manifest-${{ steps.build_info.outputs.build_time }}.plist"
           INSTALL_LINK="itms-services://?action=download-manifest&url=${MANIFEST_URL}"
           echo "$INSTALL_LINK" > install_link.txt
           echo "=================================================="
@@ -327,7 +327,7 @@ jobs:
           QR_NAME="qrcode-${{ steps.build_info.outputs.build_time }}.png"
 
           aws s3 cp qrcode.png \
-            "s3://${{ secrets.R2_BUCKET }}/ios app/qr code/${QR_NAME}" \
+            "s3://${{ secrets.R2_BUCKET }}/ios-app/qrcode/${QR_NAME}" \
             --endpoint-url "$ENDPOINT" \
             --content-type "image/png"
 
@@ -336,7 +336,7 @@ jobs:
 
       - name: Embed QR code in Summary
         run: |
-          QR_URL="${{ vars.R2_PUBLIC_URL }}/ios%20app/qr%20code/${{ steps.qr.outputs.qr_name }}"
+          QR_URL="${{ vars.R2_PUBLIC_URL }}/ios-app/qrcode/${{ steps.qr.outputs.qr_name }}"
           {
             echo ""
             echo "### 📷 扫码安装 (iPhone相机或微信扫一扫)"
