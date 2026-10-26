@@ -64,6 +64,8 @@ fix_fw() {
     rm -rf "$FW/"*
     cp -R "$TMP/"* "$FW/"
     rm -rf "$TMP"
+    # iOS 不允许 framework 带 Resources/Versions 子目录
+    rm -rf "$FW/Resources" "$FW/Versions" "$FW/Current"
   fi
 
   if [ ! -f "$FW/Libbox" ]; then
@@ -121,6 +123,10 @@ for ROOT in "$@"; do
 done
 
 if [ "$COUNT" -eq 0 ]; then
+  if [ "${ALLOW_EMPTY:-0}" = "1" ]; then
+    echo "没找到 Libbox.framework，跳过 (ALLOW_EMPTY=1)"
+    exit 0
+  fi
   echo "❌ 没找到任何 Libbox.framework（已排除 simulator）"
   exit 1
 fi
