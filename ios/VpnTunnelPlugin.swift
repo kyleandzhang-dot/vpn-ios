@@ -9,18 +9,8 @@ public class VpnTunnelPlugin: NSObject, FlutterPlugin, FlutterStreamHandler {
 
     private var eventSink: FlutterEventSink?
     private var manager: NETunnelProviderManager?
-    // 【修复 Bug】：之前这里写的是 "group.com.example.vpnAll"，跟
-    // PacketTunnelProvider.swift / AppDelegate.swift 里实际用的
-    // "group.com.miaolian.myvpn" 不是同一个 App Group —— Extension 写的
-    // EXPIRED 状态，主 App 这边永远读的是另一个容器，读不到。这是 iOS 端
-    // 到期后不弹通知的直接原因之一，改成跟 Extension 一致。
-    private let appGroup = "group.com.miaolian.myvpn"
-    // 【最终修复，有实锤依据】：CI 打出的已签名 IPA，用 codesign 直接读出来的
-    // Extension 真实 Bundle Identifier 是 "com.miaolian.myvpn.PacketTunnelExtension"
-    // （application-identifier: 85F7XUQB6K.com.miaolian.myvpn.PacketTunnelExtension），
-    // 这是从签名产物里实测出来的，不是猜的。之前的 "com.example.vpnAll.PacketTunnel"
-    // 是错的占位符，跟真实签名对不上，导致系统报 "not installed"。
-    private let providerBundleId = "com.miaolian.myvpn.PacketTunnelExtension"
+    private let appGroup = "group.com.miaolian.myvpn" // 跟 AppDelegate / Extension 里保持一致
+    private let providerBundleId = "com.miaolian.myvpn.PacketTunnelExtension" // 必须跟 Extension target 的真实 Bundle Identifier 完全一致
 
     public static func register(with registrar: FlutterPluginRegistrar) {
         let instance = VpnTunnelPlugin()
@@ -51,16 +41,14 @@ public class VpnTunnelPlugin: NSObject, FlutterPlugin, FlutterStreamHandler {
             // api_base_url 透传给 Extension，供它自己起心跳查到期状态用
             let apiBaseUrl = args["api_base_url"] as? String ?? ""
             connect(nodeJson: nodeJson, apiBaseUrl: apiBaseUrl, result: result)
-        case "getDeviceId":
-            // 关键修复：这个 case 之前压根不存在，导致 Dart 侧 VpnBridge.getDeviceId()
-            // 每次都命中 FlutterMethodNotImplemented、拿到空字符串，进而回退成
-            // ApiService 里存在本地 SharedPreferences 的随机 UUID —— 跟 Extension
-            // 心跳检测读的 Keychain 共享 ID 完全对不上，这才是"用户不存在"的真正原因。
-            // 补上之后，主 App 登录/充值/拉节点用的 device_id 才会跟 Extension
-            // 心跳检测用的 device_id 是同一个。
-            result(DeviceIdManager.getDeviceId())
         case "disconnect":
             disconnect(result: result)
+        case "getStatus":
+            getStatus(result: result)
+        case "getDeviceId":
+            // 跟 PacketTunnelProvider 里用的是同一个 DeviceIdManager，
+            // 保证主 App 和 Extension 拿到的是同一个设备号
+            result(DeviceIdManager.getDeviceId())
         default:
             result(FlutterMethodNotImplemented)
         }
@@ -81,7 +69,7 @@ public class VpnTunnelPlugin: NSObject, FlutterPlugin, FlutterStreamHandler {
             proto.providerConfiguration = ["node_json": nodeJson, "api_base_url": apiBaseUrl]
 
             manager.protocolConfiguration = proto
-            manager.localizedDescription = "喵脸"
+            manager.localizedDescription = "秒连VPN"
             manager.isEnabled = true
 
             manager.saveToPreferences { saveError in
@@ -108,8 +96,38 @@ public class VpnTunnelPlugin: NSObject, FlutterPlugin, FlutterStreamHandler {
     }
 
     private func disconnect(result: @escaping FlutterResult) {
-        manager?.connection.stopVPNTunnel()
-        result(nil)
+        if let manager = manager {
+            manager.connection.stopVPNTunnel()
+            result(nil)
+            return
+        }
+        // 冷启动后 manager 还是 nil，先加载系统里已有的再断开
+        NETunnelProviderManager.loadAllFromPreferences { [weak self] managers, _ in
+            if let m = managers?.first {
+                self?.manager = m
+                m.connection.stopVPNTunnel()
+            }
+            result(nil)
+        }
+    }
+
+    private func getStatus(result: @escaping FlutterResult) {
+        NETunnelProviderManager.loadAllFromPreferences { [weak self] managers, _ in
+            guard let m = managers?.first else {
+                result("DISCONNECTED")
+                return
+            }
+            self?.manager = m
+            result(Self.statusString(m.connection.status))
+        }
+    }
+
+    private static func statusString(_ status: NEVPNStatus) -> String {
+        switch status {
+        case .connected: return "CONNECTED"
+        case .connecting, .reasserting: return "CONNECTING"
+        default: return "DISCONNECTED"
+        }
     }
 
     private func loadOrCreateManager(_ completion: @escaping (NETunnelProviderManager?, Error?) -> Void) {
@@ -165,16 +183,7 @@ public class VpnTunnelPlugin: NSObject, FlutterPlugin, FlutterStreamHandler {
     }
 
     private func emit(forSystemStatus status: NEVPNStatus) {
-        switch status {
-        case .connected:
-            eventSink?("CONNECTED")
-        case .connecting, .reasserting:
-            eventSink?("CONNECTING")
-        case .disconnected, .invalid, .disconnecting:
-            eventSink?("DISCONNECTED")
-        @unknown default:
-            eventSink?("DISCONNECTED")
-        }
+        eventSink?(Self.statusString(status))
     }
 
     private func emitCustomStatusFromAppGroup() {

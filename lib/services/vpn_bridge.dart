@@ -65,6 +65,23 @@ class VpnBridge {
     }
   }
 
+  /// 查询原生层当前真实的 VPN 状态（冷启动/回前台时用）
+  static Future<VpnState> getStatus() async {
+    try {
+      final String? s = await _channel.invokeMethod<String>('getStatus');
+      switch (s) {
+        case 'CONNECTED':
+          return VpnState.connected;
+        case 'CONNECTING':
+          return VpnState.connecting;
+        default:
+          return VpnState.disconnected; // EXPIRED 也当断开，避免一开 App 就跳充值页
+      }
+    } catch (_) {
+      return VpnState.disconnected;
+    }
+  }
+
   static Future<String> getDeviceId() async {
     try {
       // 通过已经定义好的 _channel ('com.example.vpn_all/vpn') 调用原生方法[cite: 2]

@@ -83,6 +83,18 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
       });
     });
 
+    // 冷启动/重开 App 时同步原生层的真实 VPN 状态
+    VpnBridge.getStatus().then((s) {
+      if (!mounted) return;
+      // 只在流还没推送过更新时才覆盖，避免盖掉更新的状态
+      if (_vpnState == VpnState.disconnected && s != VpnState.disconnected) {
+        setState(() {
+          _vpnState = s;
+          _updateUIByState(s);
+        });
+      }
+    });
+
     _initData();
   }
 

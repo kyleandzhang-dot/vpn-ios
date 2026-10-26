@@ -43,6 +43,8 @@ public class VpnTunnelPlugin: NSObject, FlutterPlugin, FlutterStreamHandler {
             connect(nodeJson: nodeJson, apiBaseUrl: apiBaseUrl, result: result)
         case "disconnect":
             disconnect(result: result)
+        case "getStatus":
+            getStatus(result: result)
         case "getDeviceId":
             // 跟 PacketTunnelProvider 里用的是同一个 DeviceIdManager，
             // 保证主 App 和 Extension 拿到的是同一个设备号
@@ -94,8 +96,38 @@ public class VpnTunnelPlugin: NSObject, FlutterPlugin, FlutterStreamHandler {
     }
 
     private func disconnect(result: @escaping FlutterResult) {
-        manager?.connection.stopVPNTunnel()
-        result(nil)
+        if let manager = manager {
+            manager.connection.stopVPNTunnel()
+            result(nil)
+            return
+        }
+        // 冷启动后 manager 还是 nil，先加载系统里已有的再断开
+        NETunnelProviderManager.loadAllFromPreferences { [weak self] managers, _ in
+            if let m = managers?.first {
+                self?.manager = m
+                m.connection.stopVPNTunnel()
+            }
+            result(nil)
+        }
+    }
+
+    private func getStatus(result: @escaping FlutterResult) {
+        NETunnelProviderManager.loadAllFromPreferences { [weak self] managers, _ in
+            guard let m = managers?.first else {
+                result("DISCONNECTED")
+                return
+            }
+            self?.manager = m
+            result(Self.statusString(m.connection.status))
+        }
+    }
+
+    private static func statusString(_ status: NEVPNStatus) -> String {
+        switch status {
+        case .connected: return "CONNECTED"
+        case .connecting, .reasserting: return "CONNECTING"
+        default: return "DISCONNECTED"
+        }
     }
 
     private func loadOrCreateManager(_ completion: @escaping (NETunnelProviderManager?, Error?) -> Void) {
@@ -151,16 +183,7 @@ public class VpnTunnelPlugin: NSObject, FlutterPlugin, FlutterStreamHandler {
     }
 
     private func emit(forSystemStatus status: NEVPNStatus) {
-        switch status {
-        case .connected:
-            eventSink?("CONNECTED")
-        case .connecting, .reasserting:
-            eventSink?("CONNECTING")
-        case .disconnected, .invalid, .disconnecting:
-            eventSink?("DISCONNECTED")
-        @unknown default:
-            eventSink?("DISCONNECTED")
-        }
+        eventSink?(Self.statusString(status))
     }
 
     private func emitCustomStatusFromAppGroup() {
