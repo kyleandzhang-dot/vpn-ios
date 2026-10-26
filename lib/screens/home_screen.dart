@@ -1329,7 +1329,7 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
             ],
           ),
 
-          const SizedBox(height: 12), // 【优化】：由 16 微调为 12，拉近按钮与激活码提示的距离
+          const SizedBox(height: 12), // 【优化】：由 16 微调为 12，拉近按钮与激活码提示的距离7
 
           if (!Platform.isIOS)
             GestureDetector(
