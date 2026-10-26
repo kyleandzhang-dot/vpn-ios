@@ -48,65 +48,8 @@ jobs:
           sed -i.bak "s/^version: .*/version: ${VERSION_NAME}+${BUILD_NUM}/" pubspec.yaml
           grep '^version:' pubspec.yaml
 
-      - name: Find, Flatten Shallow Bundle and Verify committed Libbox
-        run: |
-          set -e
-          echo "== 1. 寻找仓库中提交的 Libbox.xcframework =="
-          LIBBOX_PATH=$(find ios -iname "Libbox.xcframework" | head -n 1)
-          if [ -z "$LIBBOX_PATH" ]; then
-            echo "❌ 找不到 Libbox.xcframework！"
-            exit 1
-          fi
-          
-          echo "== 2. 执行 Shallow Bundle 扁平化与 ID 初次覆写 =="
-          find "$LIBBOX_PATH" -name "*.framework" | while read -r FW_PATH; do
-            if [ -d "$FW_PATH/Versions" ]; then
-              TMP_DIR=$(mktemp -d)
-              REAL_DIR="$FW_PATH/Versions/Current"
-              [ ! -d "$REAL_DIR" ] && REAL_DIR="$FW_PATH/Versions/A"
-              cp -R -L "$REAL_DIR/"* "$TMP_DIR/" 2>/dev/null || true
-              if [ -f "$TMP_DIR/Resources/Info.plist" ]; then
-                cp -L "$TMP_DIR/Resources/Info.plist" "$TMP_DIR/Info.plist" 2>/dev/null || true
-              fi
-              rm -rf "$FW_PATH/"*
-              cp -R "$TMP_DIR/"* "$FW_PATH/" 2>/dev/null || true
-              rm -rf "$TMP_DIR"
-            fi
-
-            MINOS=$(xcrun vtool -show-build "$FW_PATH/Libbox" 2>/dev/null | awk '/minos/ {print $2; exit}')
-            if [ -z "$MINOS" ]; then
-              echo "❌ 读不到 Libbox 的 minos: $FW_PATH"
-              exit 1
-            fi
-            echo "Libbox 实际 minos = $MINOS ($FW_PATH)"
-            rm -f "$FW_PATH/Info.plist"
-            cat <<EOF > "$FW_PATH/Info.plist"
-          <?xml version="1.0" encoding="UTF-8"?>
-          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-          <plist version="1.0">
-          <dict>
-            <key>CFBundleDevelopmentRegion</key>
-            <string>en</string>
-            <key>CFBundleExecutable</key>
-            <string>Libbox</string>
-            <key>CFBundleIdentifier</key>
-            <string>Libbox</string>
-            <key>CFBundleInfoDictionaryVersion</key>
-            <string>6.0</string>
-            <key>CFBundleName</key>
-            <string>Libbox</string>
-            <key>CFBundlePackageType</key>
-            <string>FMWK</string>
-            <key>CFBundleShortVersionString</key>
-            <string>1.0</string>
-            <key>CFBundleVersion</key>
-            <string>1</string>
-            <key>MinimumOSVersion</key>
-            <string>$MINOS</string>
-          </dict>
-          </plist>
-          EOF
-          done
+      - name: Fix Libbox (repo copy)
+        run: bash ios/scripts/fix_libbox.sh ios
 
       - name: Cache CocoaPods
         uses: actions/cache@v4
@@ -130,65 +73,9 @@ jobs:
       - name: Install fastlane
         run: gem install fastlane
 
-      # 【新增核心绝杀步骤】在 pod install 跑完、Fastlane 开始打包的前一刻，
-      # 对整个 CI 机器所有残留或被 Pods 恢复出来的 Libbox 进行最后一次无条件覆盖！
-      - name: Force Lock Libbox Bundle ID Before Archiving
-        run: |
-          set -e
-          echo "== Fastlane 打包前夕：扫荡 Pods 及全网所有 Libbox.framework =="
-          find $GITHUB_WORKSPACE ~/Library/Caches/CocoaPods ~/.pub-cache -name "Libbox*.framework" 2>/dev/null | while read -r FW_PATH; do
-            echo "正在强行锁死目标: $FW_PATH"
-            
-            # 如果 Pods 缓存里还有深层嵌套，顺手干掉
-            if [ -d "$FW_PATH/Versions" ]; then
-              TMP_DIR=$(mktemp -d)
-              REAL_DIR="$FW_PATH/Versions/Current"
-              [ ! -d "$REAL_DIR" ] && REAL_DIR="$FW_PATH/Versions/A"
-              cp -R -L "$REAL_DIR/"* "$TMP_DIR/" 2>/dev/null || true
-              if [ -f "$TMP_DIR/Resources/Info.plist" ]; then
-                cp -L "$TMP_DIR/Resources/Info.plist" "$TMP_DIR/Info.plist" 2>/dev/null || true
-              fi
-              rm -rf "$FW_PATH/"*
-              cp -R "$TMP_DIR/"* "$FW_PATH/" 2>/dev/null || true
-              rm -rf "$TMP_DIR"
-            fi
-
-            # 无条件强行重写，把 CFBundleIdentifier 绝对锁死在 "Libbox"！
-            MINOS=$(xcrun vtool -show-build "$FW_PATH/Libbox" 2>/dev/null | awk '/minos/ {print $2; exit}')
-            if [ -z "$MINOS" ]; then
-              echo "❌ 读不到 Libbox 的 minos: $FW_PATH"
-              exit 1
-            fi
-            echo "Libbox 实际 minos = $MINOS ($FW_PATH)"
-            rm -f "$FW_PATH/Info.plist"
-            cat <<EOF > "$FW_PATH/Info.plist"
-          <?xml version="1.0" encoding="UTF-8"?>
-          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-          <plist version="1.0">
-          <dict>
-            <key>CFBundleDevelopmentRegion</key>
-            <string>en</string>
-            <key>CFBundleExecutable</key>
-            <string>Libbox</string>
-            <key>CFBundleIdentifier</key>
-            <string>Libbox</string>
-            <key>CFBundleInfoDictionaryVersion</key>
-            <string>6.0</string>
-            <key>CFBundleName</key>
-            <string>Libbox</string>
-            <key>CFBundlePackageType</key>
-            <string>FMWK</string>
-            <key>CFBundleShortVersionString</key>
-            <string>1.0</string>
-            <key>CFBundleVersion</key>
-            <string>1</string>
-            <key>MinimumOSVersion</key>
-            <string>$MINOS</string>
-          </dict>
-          </plist>
-          EOF
-            echo "✅ [$FW_PATH] 已成功锁死为 Libbox！"
-          done
+      # pod install 之后、fastlane 打包之前，再修一次 Pods 里恢复出来的 Libbox
+      - name: Fix Libbox (before archiving)
+        run: bash ios/scripts/fix_libbox.sh "$GITHUB_WORKSPACE/ios"
 
       - name: Run fastlane adhoc (Ad Hoc签名，用于R2/Diawi分发，不走TestFlight)
         working-directory: ios
@@ -199,6 +86,24 @@ jobs:
           MATCH_PASSWORD: ${{ secrets.MATCH_PASSWORD }}
           MATCH_GIT_BASIC_AUTHORIZATION: ${{ secrets.MATCH_GIT_BASIC_AUTHORIZATION }}
         run: fastlane adhoc
+
+      - name: Verify Libbox in IPA
+        working-directory: ios
+        run: |
+          set -euo pipefail
+          rm -rf /tmp/ipa_v && mkdir -p /tmp/ipa_v
+          unzip -q Runner.ipa -d /tmp/ipa_v
+          FW=$(find /tmp/ipa_v/Payload -name "Libbox.framework" | head -n 1)
+          [ -n "$FW" ] || { echo "❌ ipa 里没有 Libbox.framework"; exit 1; }
+
+          PLIST_MIN=$(/usr/libexec/PlistBuddy -c "Print :MinimumOSVersion" "$FW/Info.plist")
+          BIN_MIN=$(xcrun vtool -show-build "$FW/Libbox" | awk '
+            /^ *minos /  {print $2; exit}
+            /LC_VERSION_MIN_IPHONEOS/ {f=1}
+            f && /^ *version / {print $2; exit}')
+          echo "plist=$PLIST_MIN binary=$BIN_MIN"
+          [ -n "$BIN_MIN" ] || { echo "❌ 读不到二进制 minos"; xcrun vtool -show-build "$FW/Libbox" || true; exit 1; }
+          [ "$PLIST_MIN" = "$BIN_MIN" ] || { echo "❌ MinimumOSVersion 与二进制不一致"; exit 1; }
 
       - name: DEBUG - 检查 ipa 内部结构和签名(排查 not installed 问题用，确认后可删除)
         working-directory: ios
