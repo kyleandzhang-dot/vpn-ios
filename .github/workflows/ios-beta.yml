@@ -41,11 +41,12 @@ jobs:
       - name: Install Flutter dependencies
         run: flutter pub get
 
-      # - name: Set build number
-      #   run: |
-      #     VERSION_NAME=$(grep '^version:' pubspec.yaml | sed 's/version: //' | cut -d '+' -f 1)
-      #     sed -i.bak "s/^version: .*/version: ${VERSION_NAME}+${{ github.run_number }}/" pubspec.yaml
-      #     cat pubspec.yaml | grep version
+      - name: Set build number
+        run: |
+          VERSION_NAME=$(grep '^version:' pubspec.yaml | sed 's/version: //' | cut -d '+' -f 1)
+          BUILD_NUM=$(date -u +%y%m%d%H%M)
+          sed -i.bak "s/^version: .*/version: ${VERSION_NAME}+${BUILD_NUM}/" pubspec.yaml
+          grep '^version:' pubspec.yaml
 
       - name: Find, Flatten Shallow Bundle and Verify committed Libbox
         run: |
@@ -72,6 +73,12 @@ jobs:
               rm -rf "$TMP_DIR"
             fi
 
+            MINOS=$(xcrun vtool -show-build "$FW_PATH/Libbox" 2>/dev/null | awk '/minos/ {print $2; exit}')
+            if [ -z "$MINOS" ]; then
+              echo "❌ 读不到 Libbox 的 minos: $FW_PATH"
+              exit 1
+            fi
+            echo "Libbox 实际 minos = $MINOS ($FW_PATH)"
             rm -f "$FW_PATH/Info.plist"
             cat <<EOF > "$FW_PATH/Info.plist"
           <?xml version="1.0" encoding="UTF-8"?>
@@ -95,7 +102,7 @@ jobs:
             <key>CFBundleVersion</key>
             <string>1</string>
             <key>MinimumOSVersion</key>
-            <string>13.0</string>
+            <string>$MINOS</string>
           </dict>
           </plist>
           EOF
@@ -147,6 +154,12 @@ jobs:
             fi
 
             # 无条件强行重写，把 CFBundleIdentifier 绝对锁死在 "Libbox"！
+            MINOS=$(xcrun vtool -show-build "$FW_PATH/Libbox" 2>/dev/null | awk '/minos/ {print $2; exit}')
+            if [ -z "$MINOS" ]; then
+              echo "❌ 读不到 Libbox 的 minos: $FW_PATH"
+              exit 1
+            fi
+            echo "Libbox 实际 minos = $MINOS ($FW_PATH)"
             rm -f "$FW_PATH/Info.plist"
             cat <<EOF > "$FW_PATH/Info.plist"
           <?xml version="1.0" encoding="UTF-8"?>
@@ -170,7 +183,7 @@ jobs:
             <key>CFBundleVersion</key>
             <string>1</string>
             <key>MinimumOSVersion</key>
-            <string>13.0</string>
+            <string>$MINOS</string>
           </dict>
           </plist>
           EOF
@@ -222,6 +235,7 @@ jobs:
 
       - name: Run fastlane beta (可选，由仓库Variable PUSH_TO_TESTFLIGHT 控制，推送TestFlight)
         if: ${{ vars.PUSH_TO_TESTFLIGHT == 'true' }}
+        continue-on-error: true
         working-directory: ios
         env:
           APP_STORE_CONNECT_API_KEY_ID: ${{ secrets.APP_STORE_CONNECT_API_KEY_ID }}
