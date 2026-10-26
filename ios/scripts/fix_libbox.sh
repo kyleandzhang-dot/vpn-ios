@@ -51,7 +51,8 @@ fix_fw() {
   local FW="$1"
   echo "== 处理: $FW =="
 
-  # 展平 Versions 结构
+  # 将 macOS 风格的 Versions/Current 或 Versions/A 展平到 framework 根目录。
+  # 若 Resources 目录中还有运行时资源，先复制出来，再删除 iOS 不需要的深层目录。
   if [ -d "$FW/Versions" ]; then
     echo "检测到 Versions 结构，展平中"
     local TMP REAL
@@ -60,13 +61,25 @@ fix_fw() {
     if [ ! -d "$REAL" ]; then
       REAL="$FW/Versions/A"
     fi
-    cp -R -L "$REAL/"* "$TMP/"
-    rm -rf "$FW/"*
-    cp -R "$TMP/"* "$FW/"
+    if [ ! -d "$REAL" ]; then
+      echo "❌ 找不到有效的 Versions/Current 或 Versions/A: $FW"
+      rm -rf "$TMP"
+      exit 1
+    fi
+    cp -R -L "$REAL/." "$TMP/"
+    if [ -d "$FW/Resources" ]; then
+      cp -R -L "$FW/Resources/." "$TMP/"
+    fi
+    find "$FW" -mindepth 1 -maxdepth 1 -exec rm -rf {} +
+    cp -R "$TMP/." "$FW/"
     rm -rf "$TMP"
-    # iOS 不允许 framework 带 Resources/Versions 子目录
-    rm -rf "$FW/Resources" "$FW/Versions" "$FW/Current"
+  elif [ -d "$FW/Resources" ]; then
+    # 没有 Versions 目录时，也要将 Resources 内容提到根目录后再清理。
+    cp -R -L "$FW/Resources/." "$FW/"
   fi
+
+  # iOS framework 不应保留这些 macOS 风格的深层目录。
+  rm -rf "$FW/Resources" "$FW/Versions" "$FW/Current"
 
   if [ ! -f "$FW/Libbox" ]; then
     echo "❌ 缺少二进制: $FW/Libbox"

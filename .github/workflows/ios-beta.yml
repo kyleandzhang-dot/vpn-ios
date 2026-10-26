@@ -89,52 +89,7 @@ jobs:
 
       - name: Verify Libbox in IPA
         working-directory: ios
-        run: |
-          set -euo pipefail
-          rm -rf /tmp/ipa_v
-          mkdir -p /tmp/ipa_v
-          unzip -q Runner.ipa -d /tmp/ipa_v
-
-          FOUND=0
-          while IFS= read -r -d '' FW; do
-            FOUND=1
-            echo "== 检查: $FW =="
-
-            [ -f "$FW/Info.plist" ] || {
-              echo "❌ 缺少 Info.plist: $FW"
-              exit 1
-            }
-            [ -f "$FW/Libbox" ] || {
-              echo "❌ 缺少二进制: $FW/Libbox"
-              exit 1
-            }
-
-            PLIST_MIN=$(/usr/libexec/PlistBuddy -c "Print :MinimumOSVersion" "$FW/Info.plist")
-            BIN_INFO=$(xcrun vtool -show-build "$FW/Libbox" 2>&1 || true)
-            BIN_MIN=$(printf '%s\n' "$BIN_INFO" | awk '
-              /^ *minos / {print $2; exit}
-              /LC_VERSION_MIN_IPHONEOS/ {f=1}
-              f && /^ *version / {print $2; exit}
-            ')
-
-            echo "plist=$PLIST_MIN binary=$BIN_MIN"
-            if [ -z "$BIN_MIN" ]; then
-              echo "❌ 读不到二进制 minos"
-              printf '%s\n' "$BIN_INFO"
-              exit 1
-            fi
-            if [ "$PLIST_MIN" != "$BIN_MIN" ]; then
-              echo "❌ MinimumOSVersion 与二进制不一致: $FW"
-              exit 1
-            fi
-          done < <(find /tmp/ipa_v/Payload -name "Libbox.framework" -print0)
-
-          if [ "$FOUND" -ne 1 ]; then
-            echo "❌ ipa 里没有 Libbox.framework"
-            exit 1
-          fi
-
-          echo "✅ 所有 Libbox.framework 的 MinimumOSVersion 均与二进制一致"
+        run: bash scripts/verify_libbox_ipa.sh Runner.ipa
 
       - name: DEBUG - 检查 ipa 内部结构和签名(排查 not installed 问题用，确认后可删除)
         working-directory: ios

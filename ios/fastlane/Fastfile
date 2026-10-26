@@ -44,12 +44,21 @@ platform :ios do
       workspace: "Runner.xcworkspace",
       scheme: "Runner",
       export_method: "app-store",
+      output_directory: File.expand_path("..", __dir__),
+      output_name: "Runner.ipa",
       export_options: {
         provisioningProfiles: {
           "com.miaolian.myvpn" => "match AppStore com.miaolian.myvpn",
           "com.miaolian.myvpn.PacketTunnelExtension" => "match AppStore com.miaolian.myvpn.PacketTunnelExtension"
         }
       }
+    )
+
+    # Verify the exported IPA before sending it to App Store Connect.
+    sh(
+      "bash",
+      File.expand_path("../scripts/verify_libbox_ipa.sh", __dir__),
+      File.expand_path("../Runner.ipa", __dir__)
     )
 
     upload_to_testflight(
@@ -105,6 +114,7 @@ platform :ios do
       workspace: "Runner.xcworkspace",
       scheme: "Runner",
       export_method: "ad-hoc",
+      output_directory: File.expand_path("..", __dir__),
       output_name: "Runner.ipa",
       export_options: {
         provisioningProfiles: {
@@ -112,6 +122,13 @@ platform :ios do
           "com.miaolian.myvpn.PacketTunnelExtension" => "match AdHoc com.miaolian.myvpn.PacketTunnelExtension"
         }
       }
+    )
+
+    # Verify the signed/exported IPA as well; never modify it after signing.
+    sh(
+      "bash",
+      File.expand_path("../scripts/verify_libbox_ipa.sh", __dir__),
+      File.expand_path("../Runner.ipa", __dir__)
     )
   end
 end
