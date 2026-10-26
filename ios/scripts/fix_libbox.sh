@@ -1,29 +1,55 @@
 #!/bin/bash
 set -Eeuo pipefail
 
-# 任何命令失败都打印行号，避免静默退出
 trap 'echo "❌ 脚本在第 $LINENO 行失败 (exit $?)" >&2' ERR
 
+# 读取二进制的真实 minos，结果只输出到 stdout，调试信息走 stderr。
+# 支持 fat 文件、dylib，以及静态库 (ar archive)。
+# 静态库：解开后读每个 .o 的 minos，取最大值（Info.plist 必须 >= 二进制要求）。
 get_minos() {
-  local out
-  if ! out=$(xcrun vtool -show-build "$1" 2>&1); then
-    echo "❌ vtool 执行失败: $1" >&2
-    echo "$out" >&2
-    return 0
+  local BIN="$1" WORK THIN INFO VALUES MINOS=""
+  WORK=$(mktemp -d)
+  THIN="$WORK/thin"
+
+  INFO=$(lipo -info "$BIN" 2>&1 || true)
+  if [[ "$INFO" == *"fat file"* ]]; then
+    lipo "$BIN" -thin arm64 -output "$THIN"
+  else
+    cp "$BIN" "$THIN"
   fi
-  echo "--- vtool 输出 ($1) ---" >&2
-  echo "$out" >&2
-  # 兼容 LC_BUILD_VERSION (minos) 和旧式 LC_VERSION_MIN_IPHONEOS (version)
-  awk '
-    /^ *minos /  {print $2; exit}
-    /LC_VERSION_MIN_IPHONEOS/ {f=1}
-    f && /^ *version / {print $2; exit}' <<< "$out"
+
+  if [[ "$(file "$THIN")" == *"ar archive"* ]]; then
+    echo "检测到静态库 (ar archive)，解包读取各 .o 的 minos" >&2
+    mkdir "$WORK/obj"
+    ( cd "$WORK/obj" && ar -x "$THIN" )
+    echo "解出 $(find "$WORK/obj" -type f | wc -l | tr -d ' ') 个成员" >&2
+    VALUES=$(find "$WORK/obj" -type f | while read -r O; do
+      xcrun vtool -show-build "$O" 2>/dev/null | awk '
+        /^ *minos /  {print $2; exit}
+        /LC_VERSION_MIN_IPHONEOS/ {f=1}
+        f && /^ *version / {print $2; exit}' || true
+    done)
+  else
+    VALUES=$(xcrun vtool -show-build "$THIN" 2>&1 | awk '
+      /^ *minos /  {print $2; exit}
+      /LC_VERSION_MIN_IPHONEOS/ {f=1}
+      f && /^ *version / {print $2; exit}' || true)
+  fi
+
+  VALUES=$(printf '%s\n' "$VALUES" | sed '/^$/d')
+  if [ -n "$VALUES" ]; then
+    echo "各 minos 取值统计:" >&2
+    printf '%s\n' "$VALUES" | sort -V | uniq -c >&2
+    MINOS=$(printf '%s\n' "$VALUES" | sort -V | tail -n 1)
+  fi
+
+  rm -rf "$WORK"
+  printf '%s' "$MINOS"
 }
 
 fix_fw() {
   local FW="$1"
   echo "== 处理: $FW =="
-  ls -la "$FW"
 
   # 展平 Versions 结构
   if [ -d "$FW/Versions" ]; then
@@ -46,7 +72,7 @@ fix_fw() {
     exit 1
   fi
 
-  echo "文件类型: $(file "$FW/Libbox")"
+  echo "文件类型: $(file "$FW/Libbox" | head -n 1)"
 
   local MINOS
   MINOS=$(get_minos "$FW/Libbox")
@@ -76,6 +102,14 @@ fix_fw() {
 EOF
 }
 
+# 模式 1: 只打印某个二进制的 minos（给 ipa 校验用）
+if [ "${1:-}" = "--minos" ]; then
+  get_minos "$2"
+  echo
+  exit 0
+fi
+
+# 模式 2: 修复目录下所有 Libbox.framework（跳过 simulator）
 COUNT=0
 for ROOT in "$@"; do
   echo "== 扫描: $ROOT =="
