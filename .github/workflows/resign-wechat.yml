@@ -48,8 +48,6 @@ jobs:
           API_KEY_CONTENT: ${{ secrets.APP_STORE_CONNECT_API_KEY_CONTENT }}
           MATCH_PASSWORD: ${{ secrets.MATCH_PASSWORD }}
           MATCH_GIT_BASIC_AUTHORIZATION: ${{ secrets.MATCH_GIT_BASIC_AUTHORIZATION }}
-          # 可选：如果 ios/fastlane/Matchfile 里没有 git_url，请添加这个 secret
-          MATCH_GIT_URL: ${{ secrets.MATCH_GIT_URL }}
           NEW_BUNDLE_ID: ${{ env.NEW_BUNDLE_ID }}
         run: |
           echo "备份旧的 Fastfile / Appfile，避免干扰..."
@@ -106,9 +104,6 @@ jobs:
                 app_identifier: ENV["NEW_BUNDLE_ID"],
                 readonly: false
               }
-              git_url = ENV["MATCH_GIT_URL"]
-              match_opts[:git_url] = git_url if git_url && !git_url.empty?
-
               match(match_opts)
             end
           end
