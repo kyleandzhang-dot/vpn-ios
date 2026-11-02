@@ -7,9 +7,9 @@ on:
 # 可以在这里直接写死你的临时配置
 # ==========================================
 env:
-  IPA_DOWNLOAD_URL: 'https://pub-4e60f9bf8bd54482bd4ffb673efb8507.r2.dev/ipa/%E5%BE%AE%E4%BF%A1_8.0.76%E5%A4%9A%E5%BC%80.ipa'
+  IPA_DOWNLOAD_URL: 'https://pub-4e60f9bf8bd54482bd4ffb673efb8507.r2.dev/ipa/WeChat_8.0.66_iOSXY.ipa'
   NEW_BUNDLE_ID: 'com.miaolian.wechat'
-  APP_NAME: '微信'
+  APP_NAME: '微信分身'
 # ==========================================
 
 jobs:
@@ -116,10 +116,19 @@ jobs:
           set -e
           echo "== 1. 解压 IPA =="
           rm -rf /tmp/wechat_work
-          unzip -q input_ipa/original.ipa -d /tmp/wechat_work
+          # -o：遇到同名/大小写冲突的文件直接覆盖，不交互询问（有些 IPA 里有重复条目）
+          unzip -q -o input_ipa/original.ipa -d /tmp/wechat_work
           APP_PATH=$(find /tmp/wechat_work/Payload -maxdepth 1 -name "*.app" | head -n 1)
           echo "App 路径: $APP_PATH"
           INFO="$APP_PATH/Info.plist"
+
+          echo "== 1.5 检查是否已脱壳（cryptid 必须为 0）=="
+          EXEC_NAME=$(/usr/libexec/PlistBuddy -c "Print :CFBundleExecutable" "$INFO")
+          if otool -l "$APP_PATH/$EXEC_NAME" | grep -q "cryptid 1"; then
+            echo "❌ 这个 IPA 还是加密的（cryptid 1），没有脱壳。重签后无法启动，请换一个已脱壳的 IPA。"
+            exit 1
+          fi
+          echo "✅ 已脱壳 (cryptid 0)"
 
           echo "== 2. 移除与个人证书冲突的扩展和 Watch 插件 =="
           rm -rf "$APP_PATH/PlugIns" "$APP_PATH/Watch" "$APP_PATH/_CodeSignature"
