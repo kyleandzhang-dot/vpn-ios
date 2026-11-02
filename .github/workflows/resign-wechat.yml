@@ -7,7 +7,7 @@ on:
 # 可以在这里直接写死你的临时配置
 # ==========================================
 env:
-  IPA_DOWNLOAD_URL: 'https://pub-4e60f9bf8bd54482bd4ffb673efb8507.r2.dev/ipa/%E5%BE%AE%E4%BF%A1_8.0.76%E5%A4%9A%E5%BC%80.ipa'
+  IPA_DOWNLOAD_URL: 'https://pub-4e60f9bf8bd54482bd4ffb673efb8507.r2.dev/ipa/com.tencent.xin-8.0.80-Decrypted.ipa'
   NEW_BUNDLE_ID: 'com.miaolian.wechat'
   APP_NAME: '微信'
 # ==========================================
