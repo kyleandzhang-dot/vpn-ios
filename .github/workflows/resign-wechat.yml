@@ -9,7 +9,7 @@ on:
 env:
   IPA_DOWNLOAD_URL: 'https://pub-4e60f9bf8bd54482bd4ffb673efb8507.r2.dev/ipa/WeChat_8.0.66_iOSXY.ipa'
   NEW_BUNDLE_ID: 'com.miaolian.wechat'
-  APP_NAME: '微信分身'
+  APP_NAME: '微信'
 # ==========================================
 
 jobs:
@@ -185,68 +185,105 @@ jobs:
           path: output/WeChat_resigned.ipa
           retention-days: 7
 
-      # 可选步骤：配置了 R2 相关 secrets 才会执行上传并生成安装二维码，否则自动跳过
-      - name: Upload to R2 & generate install QR (optional)
-        env:
-          AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
-          AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
-          AWS_DEFAULT_REGION: auto
-          R2_ENDPOINT: ${{ secrets.R2_ENDPOINT }}
-          R2_BUCKET: ${{ secrets.R2_BUCKET }}
-          R2_PUBLIC_URL: ${{ secrets.R2_PUBLIC_URL }}
+      - name: Get build info
+        id: build_info
         run: |
-          set -e
-          if [ -z "$R2_BUCKET" ] || [ -z "$R2_ENDPOINT" ] || [ -z "$R2_PUBLIC_URL" ]; then
-            echo "未配置 R2 secrets，跳过上传。"
-            exit 0
-          fi
+          BUILD_TIME=$(date +%Y%m%d-%H%M%S)
+          echo "build_time=${BUILD_TIME}" >> "$GITHUB_OUTPUT"
+          echo "ipa_name=WeChatClone-${BUILD_TIME}.ipa" >> "$GITHUB_OUTPUT"
 
-          KEY_PREFIX="ipa/resigned"
-          IPA_URL="$R2_PUBLIC_URL/$KEY_PREFIX/WeChat_resigned.ipa"
-          MANIFEST_URL="$R2_PUBLIC_URL/$KEY_PREFIX/manifest.plist"
-
-          cat > output/manifest.plist <<PLIST
+      - name: Generate manifest.plist
+        run: |
+          cat <<EOF > manifest.plist
           <?xml version="1.0" encoding="UTF-8"?>
           <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
           <plist version="1.0">
           <dict>
-            <key>items</key>
-            <array>
-              <dict>
-                <key>assets</key>
-                <array>
+              <key>items</key>
+              <array>
                   <dict>
-                    <key>kind</key><string>software-package</string>
-                    <key>url</key><string>${IPA_URL}</string>
+                      <key>assets</key>
+                      <array>
+                          <dict>
+                              <key>kind</key>
+                              <string>software-package</string>
+                              <key>url</key>
+                              <string>${{ vars.R2_PUBLIC_URL }}/ios-app/${{ steps.build_info.outputs.ipa_name }}</string>
+                          </dict>
+                      </array>
+                      <key>metadata</key>
+                      <dict>
+                          <key>bundle-identifier</key>
+                          <string>${{ env.NEW_BUNDLE_ID }}</string>
+                          <key>bundle-version</key>
+                          <string>${BUNDLE_VERSION}</string>
+                          <key>kind</key>
+                          <string>software</string>
+                          <key>title</key>
+                          <string>${{ env.APP_NAME }}</string>
+                      </dict>
                   </dict>
-                </array>
-                <key>metadata</key>
-                <dict>
-                  <key>bundle-identifier</key><string>${{ env.NEW_BUNDLE_ID }}</string>
-                  <key>bundle-version</key><string>${BUNDLE_VERSION}</string>
-                  <key>kind</key><string>software</string>
-                  <key>title</key><string>${{ env.APP_NAME }}</string>
-                </dict>
-              </dict>
-            </array>
+              </array>
           </dict>
           </plist>
-          PLIST
+          EOF
 
-          aws s3 cp output/WeChat_resigned.ipa "s3://$R2_BUCKET/$KEY_PREFIX/WeChat_resigned.ipa" \
-            --endpoint-url "$R2_ENDPOINT"
-          aws s3 cp output/manifest.plist "s3://$R2_BUCKET/$KEY_PREFIX/manifest.plist" \
-            --endpoint-url "$R2_ENDPOINT" --content-type "text/xml"
+      - name: Upload IPA + manifest to R2
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+        run: |
+          ENDPOINT="https://${{ secrets.R2_ACCOUNT_ID }}.r2.cloudflarestorage.com"
 
-          INSTALL_LINK="itms-services://?action=download-manifest&url=$MANIFEST_URL"
-          echo "安装链接: $INSTALL_LINK"
-          qrencode -t UTF8 "$INSTALL_LINK"
-          qrencode -o output/install_qr.png -s 8 "$INSTALL_LINK"
+          aws s3 cp output/WeChat_resigned.ipa \
+            "s3://${{ secrets.R2_BUCKET }}/ios-app/${{ steps.build_info.outputs.ipa_name }}" \
+            --endpoint-url "$ENDPOINT" \
+            --content-type "application/octet-stream"
 
-      - name: Upload QR code artifact
-        if: ${{ hashFiles('output/install_qr.png') != '' }}
-        uses: actions/upload-artifact@v4
-        with:
-          name: install_qr
-          path: output/install_qr.png
-          retention-days: 7
+          aws s3 cp manifest.plist \
+            "s3://${{ secrets.R2_BUCKET }}/ios-app/manifest-${{ steps.build_info.outputs.build_time }}.plist" \
+            --endpoint-url "$ENDPOINT" \
+            --content-type "application/xml"
+
+      - name: Print install link
+        run: |
+          MANIFEST_URL="${{ vars.R2_PUBLIC_URL }}/ios-app/manifest-${{ steps.build_info.outputs.build_time }}.plist"
+          INSTALL_LINK="itms-services://?action=download-manifest&url=${MANIFEST_URL}"
+          echo "$INSTALL_LINK" > install_link.txt
+          echo "=================================================="
+          echo "📱 手机Safari打开下面链接直接安装:"
+          echo "$INSTALL_LINK"
+          echo "=================================================="
+          echo "### 📱 手机安装链接" >> "$GITHUB_STEP_SUMMARY"
+          echo "\`$INSTALL_LINK\`" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "[点击安装](${INSTALL_LINK})" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Generate QR code and upload to R2
+        id: qr
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+        run: |
+          INSTALL_LINK=$(cat install_link.txt)
+          qrencode -o qrcode.png -s 10 -m 2 "$INSTALL_LINK"
+
+          ENDPOINT="https://${{ secrets.R2_ACCOUNT_ID }}.r2.cloudflarestorage.com"
+          QR_NAME="qrcode-${{ steps.build_info.outputs.build_time }}.png"
+
+          aws s3 cp qrcode.png \
+            "s3://${{ secrets.R2_BUCKET }}/ios-app/qrcode/${QR_NAME}" \
+            --endpoint-url "$ENDPOINT" \
+            --content-type "image/png"
+
+          echo "qr_name=${QR_NAME}" >> "$GITHUB_OUTPUT"
+
+      - name: Embed QR code in Summary
+        run: |
+          QR_URL="${{ vars.R2_PUBLIC_URL }}/ios-app/qrcode/${{ steps.qr.outputs.qr_name }}"
+          {
+            echo ""
+            echo "### 📷 扫码安装 (iPhone相机或微信扫一扫)"
+            echo ""
+            echo "![install qrcode](${QR_URL})"
+          } >> "$GITHUB_STEP_SUMMARY"
