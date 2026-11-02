@@ -1,7 +1,7 @@
 name: Resign WeChat IPA
 
 on:
-  workflow_dispatch: # 无需输入框，点击即可直接执行
+  workflow_dispatch:
 
 # ==========================================
 # 可以在这里直接写死你的临时配置
@@ -9,12 +9,12 @@ on:
 env:
   IPA_DOWNLOAD_URL: 'https://pub-4e60f9bf8bd54482bd4ffb673efb8507.r2.dev/ipa/WeChat_8.0.66_iOSXY.ipa'
   NEW_BUNDLE_ID: 'com.miaolian.wechat'
-  APP_NAME: '微信'
+  APP_NAME: '微信分身'
 # ==========================================
 
 jobs:
   resign:
-    runs-on: macos-14 # 使用 macos-14 避免 macos-15 算力池占满导致的排队失败
+    runs-on: macos-14
     timeout-minutes: 30
 
     steps:
@@ -42,14 +42,30 @@ jobs:
       - name: Fetch or Create Ad Hoc Profile via Match
         working-directory: ios
         env:
-          APP_STORE_CONNECT_API_KEY_KEY_ID: ${{ secrets.APP_STORE_CONNECT_API_KEY_ID }}
-          APP_STORE_CONNECT_API_KEY_ISSUER_ID: ${{ secrets.APP_STORE_CONNECT_API_ISSUER_ID }}
-          APP_STORE_CONNECT_API_KEY_KEY: ${{ secrets.APP_STORE_CONNECT_API_KEY_CONTENT }}
+          API_KEY_ID: ${{ secrets.APP_STORE_CONNECT_API_KEY_ID }}
+          API_ISSUER_ID: ${{ secrets.APP_STORE_CONNECT_API_ISSUER_ID }}
+          API_KEY_CONTENT: ${{ secrets.APP_STORE_CONNECT_API_KEY_CONTENT }}
           MATCH_PASSWORD: ${{ secrets.MATCH_PASSWORD }}
           MATCH_GIT_BASIC_AUTHORIZATION: ${{ secrets.MATCH_GIT_BASIC_AUTHORIZATION }}
         run: |
-          fastlane match adhoc --app_identifier "${{ env.NEW_BUNDLE_ID }}"
+          echo "动态生成临时 Fastfile，强制注入 API Key，避开旧 Appfile 干扰..."
+          cat <<EOF > fastlane/Fastfile_resign
+          lane :fetch_cert do
+            app_store_connect_api_key(
+              key_id: ENV["API_KEY_ID"],
+              issuer_id: ENV["API_ISSUER_ID"],
+              key_content: ENV["API_KEY_CONTENT"],
+              is_key_content_base64: false
+            )
+            match(
+              type: "adhoc",
+              app_identifier: "${{ env.NEW_BUNDLE_ID }}"
+            )
+          end
+          EOF
           
+          fastlane fetch_cert --fastfile fastlane/Fastfile_resign
+
       - name: Modify Package & Resign
         run: |
           set -e
@@ -74,7 +90,6 @@ jobs:
           /usr/libexec/PlistBuddy -c "Set :CFBundleIdentifier ${{ env.NEW_BUNDLE_ID }}" "$APP_PATH/Info.plist"
           /usr/libexec/PlistBuddy -c "Set :CFBundleDisplayName ${{ env.APP_NAME }}" "$APP_PATH/Info.plist"
 
-          # 开启在 iPhone 系统“文件” App 中直接查看该分身沙盒的权限
           /usr/libexec/PlistBuddy -c "Add :UIFileSharingEnabled bool true" "$APP_PATH/Info.plist" 2>/dev/null || \
           /usr/libexec/PlistBuddy -c "Set :UIFileSharingEnabled true" "$APP_PATH/Info.plist"
           
@@ -82,113 +97,4 @@ jobs:
           /usr/libexec/PlistBuddy -c "Set :LSSupportsOpeningDocumentsInPlace true" "$APP_PATH/Info.plist"
 
           echo "== 6. 获取签名身份并逐级重签名 =="
-          SIGN_IDENTITY=$(security find-identity -v -p codesigning | grep "Apple" | head -n 1 | awk -F '"' '{print $2}')
-          echo "使用证书: $SIGN_IDENTITY"
-
-          if [ -d "$APP_PATH/Frameworks" ]; then
-            for f in "$APP_PATH/Frameworks"/*; do
-              if [ -d "$f" ] || [ -f "$f" ]; then
-                codesign --force --verify --verbose --sign "$SIGN_IDENTITY" "$f"
-              fi
-            done
-          fi
-
-          codesign --force --verify --verbose --sign "$SIGN_IDENTITY" --entitlements /tmp/entitlements.plist "$APP_PATH"
-
-          echo "== 7. 重新打包为 IPA =="
-          cd /tmp/wechat_work
-          zip -qry WeChat_Resigned.ipa Payload
-          mv WeChat_Resigned.ipa "$GITHUB_WORKSPACE/WeChat_Resigned.ipa"
-
-      - name: Get build info
-        id: build_info
-        run: |
-          BUILD_TIME=$(date +%Y%m%d-%H%M%S)
-          echo "build_time=${BUILD_TIME}" >> "$GITHUB_OUTPUT"
-          echo "ipa_name=WeChat2-${BUILD_TIME}.ipa" >> "$GITHUB_OUTPUT"
-
-      - name: Generate manifest.plist
-        run: |
-          cat <<EOF > manifest.plist
-          <?xml version="1.0" encoding="UTF-8"?>
-          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-          <plist version="1.0">
-          <dict>
-              <key>items</key>
-              <array>
-                  <dict>
-                      <key>assets</key>
-                      <array>
-                          <dict>
-                              <key>kind</key>
-                              <string>software-package</string>
-                              <key>url</key>
-                              <string>${{ vars.R2_PUBLIC_URL }}/ios-app/${{ steps.build_info.outputs.ipa_name }}</string>
-                          </dict>
-                      </array>
-                      <key>metadata</key>
-                      <dict>
-                          <key>bundle-identifier</key>
-                          <string>${{ env.NEW_BUNDLE_ID }}</string>
-                          <key>bundle-version</key>
-                          <string>${{ github.run_number }}</string>
-                          <key>kind</key>
-                          <string>software</string>
-                          <key>title</key>
-                          <string>${{ env.APP_NAME }}</string>
-                      </dict>
-                  </dict>
-              </array>
-          </dict>
-          </plist>
-          EOF
-
-      - name: Upload IPA + manifest to R2
-        env:
-          AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
-          AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
-        run: |
-          ENDPOINT="https://${{ secrets.R2_ACCOUNT_ID }}.r2.cloudflarestorage.com"
-
-          aws s3 cp WeChat_Resigned.ipa \
-            "s3://${{ secrets.R2_BUCKET }}/ios-app/${{ steps.build_info.outputs.ipa_name }}" \
-            --endpoint-url "$ENDPOINT" \
-            --content-type "application/octet-stream"
-
-          aws s3 cp manifest.plist \
-            "s3://${{ secrets.R2_BUCKET }}/ios-app/manifest-${{ steps.build_info.outputs.build_time }}.plist" \
-            --endpoint-url "$ENDPOINT" \
-            --content-type "application/xml"
-
-      - name: Generate QR code and upload to R2
-        id: qr
-        env:
-          AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
-          AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
-        run: |
-          MANIFEST_URL="${{ vars.R2_PUBLIC_URL }}/ios-app/manifest-${{ steps.build_info.outputs.build_time }}.plist"
-          INSTALL_LINK="itms-services://?action=download-manifest&url=${MANIFEST_URL}"
-
-          qrencode -o qrcode.png -s 10 -m 2 "$INSTALL_LINK"
-
-          ENDPOINT="https://${{ secrets.R2_ACCOUNT_ID }}.r2.cloudflarestorage.com"
-          QR_NAME="qrcode-${{ steps.build_info.outputs.build_time }}.png"
-
-          aws s3 cp qrcode.png \
-            "s3://${{ secrets.R2_BUCKET }}/ios-app/qrcode/${QR_NAME}" \
-            --endpoint-url "$ENDPOINT" \
-            --content-type "image/png"
-
-          echo "qr_name=${QR_NAME}" >> "$GITHUB_OUTPUT"
-          echo "install_link=${INSTALL_LINK}" >> "$GITHUB_OUTPUT"
-
-      - name: Embed QR code in Summary
-        run: |
-          QR_URL="${{ vars.R2_PUBLIC_URL }}/ios-app/qrcode/${{ steps.qr.outputs.qr_name }}"
-          {
-            echo "### 📱 微信分身安装链接"
-            echo "[点击直接安装](${{ steps.qr.outputs.install_link }})"
-            echo ""
-            echo "### 📷 扫码安装 (iPhone 相机扫码)"
-            echo "![install qrcode](${QR_URL})"
-          } >> "$GITHUB_STEP_SUMMARY"
+          SIGN_IDENTITY=$(security find-identity -v -p codesigning | grep "Apple" | head -
