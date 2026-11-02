@@ -37,7 +37,8 @@ jobs:
         run: |
           mkdir -p input_ipa
           echo "正在从直链下载脱壳 IPA..."
-          curl -L -o input_ipa/original.ipa "${{ env.IPA_DOWNLOAD_URL }}"
+          curl -L --fail -o input_ipa/original.ipa "${{ env.IPA_DOWNLOAD_URL }}"
+          ls -lh input_ipa/original.ipa
 
       - name: Fetch or Create Ad Hoc Profile via Match
         working-directory: ios
@@ -47,32 +48,55 @@ jobs:
           API_KEY_CONTENT: ${{ secrets.APP_STORE_CONNECT_API_KEY_CONTENT }}
           MATCH_PASSWORD: ${{ secrets.MATCH_PASSWORD }}
           MATCH_GIT_BASIC_AUTHORIZATION: ${{ secrets.MATCH_GIT_BASIC_AUTHORIZATION }}
+          # 可选：如果 ios/fastlane/Matchfile 里没有 git_url，请添加这个 secret
+          MATCH_GIT_URL: ${{ secrets.MATCH_GIT_URL }}
+          NEW_BUNDLE_ID: ${{ env.NEW_BUNDLE_ID }}
         run: |
-          echo "动态生成临时 Fastfile，强制注入 API Key，避开旧 Appfile 干扰..."
-          cat <<EOF > fastlane/Fastfile_resign
-          lane :fetch_cert do
-            app_store_connect_api_key(
-              key_id: ENV["API_KEY_ID"],
-              issuer_id: ENV["API_ISSUER_ID"],
-              key_content: ENV["API_KEY_CONTENT"],
-              is_key_content_base64: false
-            )
-            match(
-              type: "adhoc",
-              app_identifier: "${{ env.NEW_BUNDLE_ID }}"
-            )
+          echo "备份旧的 Fastfile / Appfile，避免干扰..."
+          mkdir -p fastlane
+          [ -f fastlane/Fastfile ] && mv fastlane/Fastfile fastlane/Fastfile.bak || true
+          [ -f fastlane/Appfile ] && mv fastlane/Appfile fastlane/Appfile.bak || true
+
+          echo "动态生成临时 Fastfile，强制注入 API Key..."
+          cat <<'EOF' > fastlane/Fastfile
+          default_platform(:ios)
+
+          platform :ios do
+            lane :fetch_cert do
+              # CI 上创建临时 keychain，避免证书导入时弹窗卡住
+              setup_ci
+
+              app_store_connect_api_key(
+                key_id: ENV["API_KEY_ID"],
+                issuer_id: ENV["API_ISSUER_ID"],
+                key_content: ENV["API_KEY_CONTENT"],
+                is_key_content_base64: false
+              )
+
+              match_opts = {
+                type: "adhoc",
+                app_identifier: ENV["NEW_BUNDLE_ID"],
+                readonly: false
+              }
+              git_url = ENV["MATCH_GIT_URL"]
+              match_opts[:git_url] = git_url if git_url && !git_url.empty?
+
+              match(match_opts)
+            end
           end
           EOF
-          
-          fastlane fetch_cert --fastfile fastlane/Fastfile_resign
+
+          fastlane fetch_cert
 
       - name: Modify Package & Resign
         run: |
           set -e
           echo "== 1. 解压 IPA =="
+          rm -rf /tmp/wechat_work
           unzip -q input_ipa/original.ipa -d /tmp/wechat_work
-          APP_PATH=$(find /tmp/wechat_work/Payload -maxdepth 1 -name "*.app")
+          APP_PATH=$(find /tmp/wechat_work/Payload -maxdepth 1 -name "*.app" | head -n 1)
           echo "App 路径: $APP_PATH"
+          INFO="$APP_PATH/Info.plist"
 
           echo "== 2. 移除与个人证书冲突的扩展和 Watch 插件 =="
           rm -rf "$APP_PATH/PlugIns" "$APP_PATH/Watch" "$APP_PATH/_CodeSignature"
@@ -87,14 +111,119 @@ jobs:
           /usr/libexec/PlistBuddy -x -c 'Print :Entitlements' /tmp/profile.plist > /tmp/entitlements.plist
 
           echo "== 5. 修改 Info.plist 的 Bundle ID、显示名称并开启‘文件’App访问 =="
-          /usr/libexec/PlistBuddy -c "Set :CFBundleIdentifier ${{ env.NEW_BUNDLE_ID }}" "$APP_PATH/Info.plist"
-          /usr/libexec/PlistBuddy -c "Set :CFBundleDisplayName ${{ env.APP_NAME }}" "$APP_PATH/Info.plist"
+          # 通用函数：键存在就 Set，不存在就 Add
+          plist_put() {
+            /usr/libexec/PlistBuddy -c "Set :$1 $3" "$INFO" 2>/dev/null || \
+            /usr/libexec/PlistBuddy -c "Add :$1 $2 $3" "$INFO"
+          }
+          plist_put CFBundleIdentifier  string "${{ env.NEW_BUNDLE_ID }}"
+          plist_put CFBundleDisplayName string "${{ env.APP_NAME }}"
+          plist_put UIFileSharingEnabled bool true
+          plist_put LSSupportsOpeningDocumentsInPlace bool true
 
-          /usr/libexec/PlistBuddy -c "Add :UIFileSharingEnabled bool true" "$APP_PATH/Info.plist" 2>/dev/null || \
-          /usr/libexec/PlistBuddy -c "Set :UIFileSharingEnabled true" "$APP_PATH/Info.plist"
-          
-          /usr/libexec/PlistBuddy -c "Add :LSSupportsOpeningDocumentsInPlace bool true" "$APP_PATH/Info.plist" 2>/dev/null || \
-          /usr/libexec/PlistBuddy -c "Set :LSSupportsOpeningDocumentsInPlace true" "$APP_PATH/Info.plist"
+          BUNDLE_VERSION=$(/usr/libexec/PlistBuddy -c "Print :CFBundleShortVersionString" "$INFO")
+          echo "BUNDLE_VERSION=$BUNDLE_VERSION" >> "$GITHUB_ENV"
 
           echo "== 6. 获取签名身份并逐级重签名 =="
-          SIGN_IDENTITY=$(security find-identity -v -p codesigning | grep "Apple" | head -
+          SIGN_IDENTITY=$(security find-identity -v -p codesigning | grep -E "Distribution" | head -n 1 | awk '{print $2}')
+          if [ -z "$SIGN_IDENTITY" ]; then
+            SIGN_IDENTITY=$(security find-identity -v -p codesigning | grep "Apple" | head -n 1 | awk '{print $2}')
+          fi
+          if [ -z "$SIGN_IDENTITY" ]; then
+            echo "未找到可用的签名证书"
+            security find-identity -v -p codesigning || true
+            exit 1
+          fi
+          echo "签名身份: $SIGN_IDENTITY"
+
+          # 由内向外签名：dylib、framework（-depth 保证子目录先于父目录）
+          find "$APP_PATH" -depth \( -name "*.dylib" -o -name "*.framework" -o -name "*.appex" \) -print0 | \
+            while IFS= read -r -d '' ITEM; do
+              echo "签名: ${ITEM#$APP_PATH/}"
+              codesign -f -s "$SIGN_IDENTITY" "$ITEM"
+            done
+
+          # 最后签主程序（带 entitlements）
+          codesign -f -s "$SIGN_IDENTITY" --entitlements /tmp/entitlements.plist "$APP_PATH"
+
+          echo "== 7. 校验签名 =="
+          codesign --verify --deep --strict --verbose=2 "$APP_PATH"
+          codesign -d --entitlements :- "$APP_PATH" 2>/dev/null | head -n 40 || true
+
+          echo "== 8. 重新打包 IPA =="
+          mkdir -p "$GITHUB_WORKSPACE/output"
+          (cd /tmp/wechat_work && zip -qry "$GITHUB_WORKSPACE/output/WeChat_resigned.ipa" Payload)
+          ls -lh "$GITHUB_WORKSPACE/output/WeChat_resigned.ipa"
+
+      - name: Upload IPA artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: WeChat_resigned
+          path: output/WeChat_resigned.ipa
+          retention-days: 7
+
+      # 可选步骤：配置了 R2 相关 secrets 才会执行上传并生成安装二维码，否则自动跳过
+      - name: Upload to R2 & generate install QR (optional)
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          AWS_DEFAULT_REGION: auto
+          R2_ENDPOINT: ${{ secrets.R2_ENDPOINT }}
+          R2_BUCKET: ${{ secrets.R2_BUCKET }}
+          R2_PUBLIC_URL: ${{ secrets.R2_PUBLIC_URL }}
+        run: |
+          set -e
+          if [ -z "$R2_BUCKET" ] || [ -z "$R2_ENDPOINT" ] || [ -z "$R2_PUBLIC_URL" ]; then
+            echo "未配置 R2 secrets，跳过上传。"
+            exit 0
+          fi
+
+          KEY_PREFIX="ipa/resigned"
+          IPA_URL="$R2_PUBLIC_URL/$KEY_PREFIX/WeChat_resigned.ipa"
+          MANIFEST_URL="$R2_PUBLIC_URL/$KEY_PREFIX/manifest.plist"
+
+          cat > output/manifest.plist <<PLIST
+          <?xml version="1.0" encoding="UTF-8"?>
+          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+          <plist version="1.0">
+          <dict>
+            <key>items</key>
+            <array>
+              <dict>
+                <key>assets</key>
+                <array>
+                  <dict>
+                    <key>kind</key><string>software-package</string>
+                    <key>url</key><string>${IPA_URL}</string>
+                  </dict>
+                </array>
+                <key>metadata</key>
+                <dict>
+                  <key>bundle-identifier</key><string>${{ env.NEW_BUNDLE_ID }}</string>
+                  <key>bundle-version</key><string>${BUNDLE_VERSION}</string>
+                  <key>kind</key><string>software</string>
+                  <key>title</key><string>${{ env.APP_NAME }}</string>
+                </dict>
+              </dict>
+            </array>
+          </dict>
+          </plist>
+          PLIST
+
+          aws s3 cp output/WeChat_resigned.ipa "s3://$R2_BUCKET/$KEY_PREFIX/WeChat_resigned.ipa" \
+            --endpoint-url "$R2_ENDPOINT"
+          aws s3 cp output/manifest.plist "s3://$R2_BUCKET/$KEY_PREFIX/manifest.plist" \
+            --endpoint-url "$R2_ENDPOINT" --content-type "text/xml"
+
+          INSTALL_LINK="itms-services://?action=download-manifest&url=$MANIFEST_URL"
+          echo "安装链接: $INSTALL_LINK"
+          qrencode -t UTF8 "$INSTALL_LINK"
+          qrencode -o output/install_qr.png -s 8 "$INSTALL_LINK"
+
+      - name: Upload QR code artifact
+        if: ${{ hashFiles('output/install_qr.png') != '' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: install_qr
+          path: output/install_qr.png
+          retention-days: 7
