@@ -149,7 +149,10 @@ class CustomVpnService : VpnService() {
                 conn.readTimeout = 5000
 
                 val json = JSONObject()
-                json.put("device_id", android.provider.Settings.Secure.getString(contentResolver, android.provider.Settings.Secure.ANDROID_ID).uppercase())
+                // Keep the exact same value/casing used by the Flutter android_id
+                // plugin. Uppercasing here creates a second, expired backend user
+                // because device_id lookup is case-sensitive.
+                json.put("device_id", android.provider.Settings.Secure.getString(contentResolver, android.provider.Settings.Secure.ANDROID_ID))
 
                 val writer = OutputStreamWriter(conn.outputStream)
                 writer.write(json.toString())
