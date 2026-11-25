@@ -1,4 +1,4 @@
-name: Resign WeChat IPA
+name: 99 - Resign WeChat IPA
 
 on:
   workflow_dispatch:
