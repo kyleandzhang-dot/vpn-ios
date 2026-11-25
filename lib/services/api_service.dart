@@ -242,8 +242,14 @@ class ApiService {
   /// 返回 {code: -1/状态码, msg: ...}，不抛异常，方便面板区分加载中/出错/空列表。
   static Future<Map<String, dynamic>> fetchNodes() async {
     try {
+      // 节点列表也必须携带与 get_node 相同的设备身份，否则后端无法查询
+      // 当前用户的标签，只能把请求当成匿名请求处理。
+      final deviceId = await getDeviceId();
+      final uri = Uri.parse('${AppConfig.apiBaseUrl}/api/v1/nodes').replace(
+        queryParameters: {'device_id': deviceId},
+      );
       final response = await http
-          .get(Uri.parse('${AppConfig.apiBaseUrl}/api/v1/nodes'))
+          .get(uri)
           .timeout(const Duration(seconds: 8));
       if (response.statusCode == 200) {
         return json.decode(response.body);
