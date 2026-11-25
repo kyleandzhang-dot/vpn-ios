@@ -1,6 +1,6 @@
 name: my_vpn_app
 description: 喵脸 VPN 
-version: 1.0.0+128
+version: 1.0.0+129
 environment:
   sdk: '>=3.0.0 <4.0.0'
 
@@ -33,6 +33,10 @@ flutter_launcher_icons:
   ios: true                            # 同时为 iOS 端切图生成
   image_path: "assets/app_icon.png"    # 请将准备好的 1024x1024 图标命名为这个路径
   min_sdk_android: 26                  # 与你刚配置的 VPN 底层 SDK 26 保持完美一致
+  windows:
+    generate: true                     # 生成 windows/runner/resources/app_icon.ico
+    image_path: "assets/app_icon.png"
+    icon_size: 256
 
 flutter:
   uses-material-design: true

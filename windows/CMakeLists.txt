@@ -4,7 +4,7 @@ project(vpn_all LANGUAGES CXX)
 
 # The name of the executable created for the application. Change this to change
 # the on-disk name of your application.
-set(BINARY_NAME "vpn_all")
+set(BINARY_NAME "MiaoLian")
 
 # Explicitly opt in to modern CMake behaviors to avoid warnings with recent
 # versions of CMake.
@@ -105,4 +105,9 @@ install(DIRECTORY "${PROJECT_BUILD_DIR}/${FLUTTER_ASSET_DIR_NAME}"
 # Install the AOT library on non-Debug builds only.
 install(FILES "${AOT_LIBRARY}" DESTINATION "${INSTALL_BUNDLE_DATA_DIR}"
   CONFIGURATIONS Profile;Release
+  COMPONENT Runtime)
+
+# VPN core (xray): windows/core/miaolian-core.exe -> <exe dir>/core/
+install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/core/miaolian-core.exe"
+  DESTINATION "${CMAKE_INSTALL_PREFIX}/core"
   COMPONENT Runtime)

@@ -8,7 +8,11 @@ class NotificationService {
   static const _expireChannelId = 'expire_channel';
   static const _expireNotificationId = 1001;
 
+  // flutter_local_notifications 17.x 不支持 Windows，桌面端整体跳过
+  static bool get _supported => Platform.isAndroid || Platform.isIOS;
+
   static Future<void> init() async {
+    if (!_supported) return;
     tz_data.initializeTimeZones();
     tz.setLocalLocation(tz.getLocation(await _localTimeZoneName()));
 
@@ -40,6 +44,7 @@ class NotificationService {
   }
 
   static Future<bool> requestPermission() async {
+    if (!_supported) return true;
     if (Platform.isIOS) {
       final result = await _plugin
           .resolvePlatformSpecificImplementation<
@@ -61,6 +66,7 @@ class NotificationService {
     required DateTime expireTime,
     Duration before = const Duration(hours: 1),
   }) async {
+    if (!_supported) return;
     await _plugin.cancel(_expireNotificationId);
 
     final fireTime = expireTime.subtract(before);
@@ -87,6 +93,7 @@ class NotificationService {
   }
 
   static Future<void> showExpiredNow() async {
+    if (!_supported) return;
     await _plugin.show(
       _expireNotificationId + 1,
       '服务已到期',

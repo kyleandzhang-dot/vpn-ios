@@ -19,7 +19,9 @@ class ApiService {
 
   static Future<String> getDeviceId() async {
     final prefs = await SharedPreferences.getInstance();
-    String? deviceId = prefs.getString('device_uuid');
+    // Windows 换了取号算法（硬件 UUID），用新的缓存键，避免读到旧的 MachineGuid 缓存
+    final cacheKey = Platform.isWindows ? 'device_uuid_hw' : 'device_uuid';
+    String? deviceId = prefs.getString(cacheKey);
     if (deviceId != null && deviceId.isNotEmpty) {
       return deviceId;
     }
@@ -49,6 +51,8 @@ class ApiService {
         // 这里不再重复 replaceAll/toUpperCase——原生给什么就用什么，避免
         // 两边各自处理一遍、以后有一边改了格式却忘了同步改另一边。
         deviceId = nativeId.isNotEmpty ? nativeId : null;
+      } else if (Platform.isWindows) {
+        deviceId = await _windowsHardwareId();
       }
     } catch (_) {
       deviceId = null;
@@ -64,8 +68,16 @@ class ApiService {
 
     if (gotValidId) {
       // 拿到真实、有效的设备号：正常永久缓存，下次直接复用。
-      await prefs.setString('device_uuid', deviceId!);
+      await prefs.setString(cacheKey, deviceId!);
       return deviceId;
+    }
+
+    // Windows 取不到 MachineGuid 时：随机 ID 必须落盘，否则每次重启都变成新账号
+    // （时长、签到、充值全部对不上，还能被刷免费时长）。
+    if (Platform.isWindows) {
+      final id = const Uuid().v4().replaceAll('-', '').toUpperCase();
+      await prefs.setString(cacheKey, id);
+      return id;
     }
 
     // 拿不到真实设备号：只生成一个"这次运行"用的随机 UUID，绝不写进
@@ -75,6 +87,43 @@ class ApiService {
     // 下次冷启动会重新走一遍上面的真实设备号获取逻辑。
     _sessionFallbackId ??= const Uuid().v4().replaceAll('-', '').toUpperCase();
     return _sessionFallbackId!;
+  }
+
+  /// Windows 机器唯一 ID（注册表 MachineGuid），去横杠转大写，与安卓 ANDROID_ID 风格一致。
+  static Future<String?> _windowsMachineId() async {
+    try {
+      final r = await Process.run('reg',
+          ['query', r'HKLM\SOFTWARE\Microsoft\Cryptography', '/v', 'MachineGuid']);
+      final m = RegExp(r'MachineGuid\s+REG_SZ\s+([0-9a-fA-F-]{32,36})')
+          .firstMatch(r.stdout.toString());
+      if (m != null) return m.group(1)!.replaceAll('-', '').toUpperCase();
+    } catch (_) {}
+    return null;
+  }
+
+  // 厂商常见的无效/占位 UUID（去横杠、大写后比较）
+  static const _badHwIds = {
+    'FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF',
+    '00000000000000000000000000000000',
+    '03000200040005000006000700080009',
+    '11111111222233334444555555555555',
+  };
+
+  /// 优先用主板/BIOS UUID（重装系统不变），取不到或无效就回退到 MachineGuid。
+  static Future<String?> _windowsHardwareId() async {
+    try {
+      final r = await Process.run('powershell', [
+        '-NoProfile',
+        '-NonInteractive',
+        '-Command',
+        '(Get-CimInstance Win32_ComputerSystemProduct).UUID',
+      ]).timeout(const Duration(seconds: 8));
+      final id = r.stdout.toString().trim().replaceAll('-', '').toUpperCase();
+      if (RegExp(r'^[0-9A-F]{32}$').hasMatch(id) && !_badHwIds.contains(id)) {
+        return id;
+      }
+    } catch (_) {}
+    return await _windowsMachineId();
   }
 
   static Future<Map<String, dynamic>> fetchConfig() async {

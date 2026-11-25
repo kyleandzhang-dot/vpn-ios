@@ -1,5 +1,7 @@
 import 'dart:async';
+import 'dart:io';
 import 'package:flutter/services.dart';
+import 'windows_vpn.dart';
 
 enum VpnState { disconnected, connecting, connected, expired }
 
@@ -26,6 +28,7 @@ class VpnBridge {
   static Stream<VpnState>? _statusStream;
 
   static Stream<VpnState> get statusStream {
+    if (Platform.isWindows) return WindowsVpn.instance.stream;
     _statusStream ??= _eventChannel.receiveBroadcastStream().map((event) {
       final String stateStr = event.toString();
       switch (stateStr) {
@@ -47,6 +50,7 @@ class VpnBridge {
   /// 应用内 VpnService（跟主 App 同进程），不需要这个参数也能正常工作，
   /// 传了也不影响。
   static Future<void> connect(String nodeJson, {String apiBaseUrl = ''}) async {
+    if (Platform.isWindows) return WindowsVpn.instance.connect(nodeJson);
     try {
       await _channel.invokeMethod('connect', {
         'node_json': nodeJson,
@@ -58,6 +62,7 @@ class VpnBridge {
   }
 
   static Future<void> disconnect() async {
+    if (Platform.isWindows) return WindowsVpn.instance.disconnect();
     try {
       await _channel.invokeMethod('disconnect');
     } catch (e) {
@@ -67,6 +72,10 @@ class VpnBridge {
 
   /// 查询原生层当前真实的 VPN 状态（冷启动/回前台时用）
   static Future<VpnState> getStatus() async {
+    if (Platform.isWindows) {
+      final s = WindowsVpn.instance.state;
+      return s == VpnState.expired ? VpnState.disconnected : s;
+    }
     try {
       final String? s = await _channel.invokeMethod<String>('getStatus');
       switch (s) {

@@ -86,7 +86,7 @@ class MainActivity : FlutterActivity() {
                         startService(intent)
                         result.success(null)
                     }
-                    "getCurrentState" -> {
+                    "getStatus", "getCurrentState" -> {
                         result.success(if (XrayEngine.isConnected()) "CONNECTED" else "DISCONNECTED")
                     }
                     else -> result.notImplemented()

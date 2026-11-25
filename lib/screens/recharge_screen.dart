@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:qr_flutter/qr_flutter.dart';
 import 'package:url_launcher/url_launcher.dart';
@@ -272,32 +273,40 @@ class _RechargeScreenState extends State<RechargeScreen> {
                     Text('等待支付确认', style: TextStyle(fontSize: 14, color: Color(0xFF888888))),
                   ],
                 ),
-                const SizedBox(height: 28),
-                SizedBox(
-                  width: double.infinity,
-                  child: OutlinedButton(
-                    onPressed: _saveQrToGallery,
-                    style: OutlinedButton.styleFrom(
-                      side: const BorderSide(color: Colors.black),
-                      padding: const EdgeInsets.symmetric(vertical: 13),
-                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(999)),
+                if (Platform.isWindows)
+                  const Padding(
+                    padding: EdgeInsets.only(top: 20),
+                    child: Text('请用手机微信扫描上方二维码完成支付',
+                        style: TextStyle(fontSize: 13, color: Color(0xFF888888))),
+                  )
+                else ...[
+                  const SizedBox(height: 28),
+                  SizedBox(
+                    width: double.infinity,
+                    child: OutlinedButton(
+                      onPressed: _saveQrToGallery,
+                      style: OutlinedButton.styleFrom(
+                        side: const BorderSide(color: Colors.black),
+                        padding: const EdgeInsets.symmetric(vertical: 13),
+                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(999)),
+                      ),
+                      child: const Text('保存二维码至相册', style: TextStyle(fontSize: 15, fontWeight: FontWeight.bold, color: Colors.black)),
                     ),
-                    child: const Text('保存二维码至相册', style: TextStyle(fontSize: 15, fontWeight: FontWeight.bold, color: Colors.black)),
                   ),
-                ),
-                const SizedBox(height: 12),
-                SizedBox(
-                  width: double.infinity,
-                  child: ElevatedButton(
-                    onPressed: _openWechatPay,
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: Colors.black,
-                      padding: const EdgeInsets.symmetric(vertical: 14),
-                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(999)),
+                  const SizedBox(height: 12),
+                  SizedBox(
+                    width: double.infinity,
+                    child: ElevatedButton(
+                      onPressed: _openWechatPay,
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: Colors.black,
+                        padding: const EdgeInsets.symmetric(vertical: 14),
+                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(999)),
+                      ),
+                      child: const Text('打开微信完成支付', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: Colors.white)),
                     ),
-                    child: const Text('打开微信完成支付', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: Colors.white)),
                   ),
-                ),
+                ],
               ],
             ),
           ),
